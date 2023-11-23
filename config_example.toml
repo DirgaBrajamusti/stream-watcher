@@ -1,0 +1,21 @@
+[yt-dlp]
+executable_path = "yt-dlp"
+working_directory = "./temp"
+args = ["-s"]
+
+[archive]
+twitch=true
+youtube=true
+
+[discord]
+notify=true
+webhook="https://discord.com/api/webhooks/"
+
+[[twitch_channel]]
+name="niamocha"
+filters = [""]
+
+[[youtube_channel]]
+id = "UC6eWCld0KwmyHFbAqK3V-Rw"
+name = "Koyori"
+filters = ["(?i)Archive"]
