@@ -202,43 +202,28 @@ func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
 
 func CheckLiveAllChannel() {
 	for i, channel := range config.AppConfig.YouTubeChannel {
-		golog.Info("youtube checking live: ", channel.Name)
+		golog.Info("[youtube] checking live: ", channel.Name)
 		channelLive, err := GetChannelLive(channel.ID)
 		if err != nil {
 			golog.Error(err)
 		}
 		if channelLive != nil {
 			if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
-				golog.Debug("youtube live is in download jobs: ", channel.Name)
+				golog.Debug("[youtube] live is in download jobs: ", channel.Name)
 			} else {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
 				if videoInRegex {
-					golog.Info("youtube live is in regex: ", channel.Name)
+					golog.Info("[youtube] live is in regex: ", channel.Name)
 					discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
 					go func() {
 						ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
 					}()
 				} else {
-					golog.Debug("youtube live is not in regex: ", channel.Name)
+					golog.Debug("[youtube] live is not in regex: ", channel.Name)
 				}
 			}
-
-			// hasil := CheckVideoRegex(channelLive.Title, channel.Filters)
-			// if hasil {
-			// 	if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
-			// 		golog.Debug("youtube live is in download jobs: ", channel.Name)
-			// 	} else {
-			// 		golog.Info("youtube live is in regex: ", channel.Name)
-			// 		discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
-			// 		go func() {
-			// 			ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, config.AppConfig.YTArchive.OutPath)
-			// 		}()
-			// 	}
-			// } else {
-			// 	golog.Debug("youtube live is not in regex: ", channel.Name)
-			// }
 		} else {
-			golog.Debug("youtube channel is not live: ", channel.Name)
+			golog.Debug("[youtube] channel is not live: ", channel.Name)
 		}
 		if i < len(config.AppConfig.YouTubeChannel)-1 {
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)

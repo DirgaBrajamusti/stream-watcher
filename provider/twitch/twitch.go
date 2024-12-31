@@ -88,34 +88,34 @@ func GetChannelInfo(username string) (*common.ChannelLive, error) {
 func CheckLiveAllChannel() {
 	for i, channel := range config.AppConfig.TwitchChannel {
 		if common.IsChannelIDInDownloadJobs(channel.Name) {
-			golog.Debug("[Twitch] ", channel.Name, " is already in download jobs")
+			golog.Debug("[twitch] ", channel.Name, " is already in download jobs")
 			break
 		}
-		golog.Info("[Twitch] Checking if ", channel.Name, " is live")
+		golog.Info("[twitch] Checking if ", channel.Name, " is live")
 		channelLive, err := GetChannelInfo(channel.Name)
 		if err != nil {
 			golog.Error(err)
 		}
 		if channelLive != nil {
 			if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
-				golog.Debug("[Twitch] ", channel.Name, " is already in download jobs")
+				golog.Debug("[twitch] ", channel.Name, " is already in download jobs")
 			} else {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
 				if videoInRegex {
-					golog.Info("[Twitch] ", channel.Name, " is live: ", channelLive.Title)
+					golog.Info("[twitch] ", channel.Name, " is live: ", channelLive.Title)
 					discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://twitch.tv"+channel.Name, channelLive.ThumbnailUrl, "Recording")
 					go func() {
 						ytdlp.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
 					}()
 				} else {
-					golog.Debug("[Twitch] ", channel.Name, " is live but not in filter")
+					golog.Debug("[twitch] ", channel.Name, " is live but not in filter")
 				}
 			}
 		} else {
-			golog.Debug("[Twitch] ", channel.Name, " is not live")
+			golog.Debug("[twitch] ", channel.Name, " is not live")
 		}
 		if i < len(config.AppConfig.TwitchChannel)-1 {
-			golog.Debug("[Twitch] Waiting ", config.AppConfig.Archive.Checker, " minutes before checking next channel")
+			golog.Debug("[twitch] Waiting ", config.AppConfig.Archive.Checker, " minutes before checking next channel")
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
 	}

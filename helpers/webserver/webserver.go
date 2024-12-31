@@ -34,14 +34,18 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsedUrl, _ := url.Parse(task.YoutubeUrl)
+	parsedUrl, err := url.Parse(task.YoutubeUrl)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	channelLive, err := youtube.GetVideoDetailsFromID(*youtube.ParseVideoID(parsedUrl))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	go func() {
-		golog.Info("Added task for video from api: ", channelLive.VideoID)
+		golog.Info("[webserver] Added task for video from api: ", channelLive.VideoID)
 		ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, task.OutPath)
 	}()
 

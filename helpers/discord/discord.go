@@ -82,7 +82,7 @@ func SendNotificationWebhook(channelName string, title string, videoUrl string, 
 		client := &http.Client{}
 		req, err := http.NewRequest("POST", config.AppConfig.Discord.Webhook, bytes.NewBuffer(jsonPayload))
 		if err != nil {
-			golog.Error("discord send notification error:", err)
+			golog.Error("[discord] send notification error:", err)
 			return
 		}
 		for key, value := range headers {
@@ -96,9 +96,9 @@ func SendNotificationWebhook(channelName string, title string, videoUrl string, 
 		defer resp.Body.Close()
 
 		if resp.StatusCode != 400 {
-			golog.Debug("discord send notification successfully")
+			golog.Debug("[discord] send notification successfully")
 		} else {
-			golog.Error("discord send notification error")
+			golog.Error("[discord] send notification error")
 		}
 
 	}
