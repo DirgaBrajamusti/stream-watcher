@@ -62,11 +62,42 @@ func getDownloadJobs(w http.ResponseWriter, r *http.Request) {
 	defer common.DownloadJobsLock.Unlock()
 
 	// Convert the DownloadJobs map to a slice for JSON response
-	jobsSlice := make([]*common.DownloadJob, 0, len(common.DownloadJobs))
-	for _, job := range common.DownloadJobs {
-		jobsSlice = append(jobsSlice, job)
-	}
+	// jobsSlice := make([]*common.DownloadJob, 0, len(common.DownloadJobs))
+	// for _, job := range common.DownloadJobs {
+	// 	jobsSlice = append(jobsSlice, job)
+	// }
+	jobsSlice := convertDownloadJobsToResponse(common.DownloadJobs)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobsSlice)
+}
+
+func convertDownloadJobsToResponse(jobs map[string]*common.DownloadJob) []Response {
+	var responses []Response
+	for _, job := range jobs {
+		response := Response{
+			Task: Task{
+				Title:           job.ChannelLive.Title,
+				VideoID:         job.VideoID,
+				VideoPicture:    job.ChannelLive.ThumbnailUrl,
+				ChannelName:     "Channel Name Placeholder",
+				ChannelID:       job.ChannelLive.ChannelID,
+				ChannelPicture:  "Channel Picture Placeholder",
+				OutputDirectory: job.OutPath,
+			},
+			Status: Status{
+				Version:        "0.5.0",
+				State:          job.Status,
+				LastOutput:     job.Output,
+				LastUpdate:     nil,
+				VideoFragments: 0,
+				AudioFragments: 0,
+				TotalSize:      "0",
+				VideoQuality:   "best",
+				OutputFile:     job.OutPath,
+			},
+		}
+		responses = append(responses, response)
+	}
+	return responses
 }
