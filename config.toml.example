@@ -1,0 +1,46 @@
+[yt-dlp]
+executable_path = "yt-dlp"
+working_directory = "./temp"
+args = []
+
+[ytarchive]
+executable_path = "ytarchive"
+working_directory = "./temp"
+args = [
+  "--vp9", "--thumbnail", "--add-metadata", "--threads", "4",
+  "--retry-stream", "60",
+  "--thumbnail",
+  "--output", "%(upload_date)s %(title)s [%(channel)s] (%(id)s)"
+]
+quality = "best"
+delay_start = "1s"
+
+[archive]
+cookies = "./cookies.txt" //used for youtube
+checker = 1
+twitch = true
+youtube = true
+
+[webserver]
+host = "0.0.0.0"
+port = 3000
+
+[discord]
+notify = true
+webhook = "https://discord.com/api/webhooks/your_webhook_url"
+
+[[twitch_channel]]
+name = "ChannelName1"
+filters = [""]
+out_path = "./downloads/ChannelName1"
+
+[[twitch_channel]]
+name = "ChannelName2"
+filters = [""]
+out_path = "./downloads/ChannelName2"
+
+[[youtube_channel]]
+id = "YourChannelID"
+name = "ChannelName"
+filters = [""]
+out_path = "./downloads/ChannelName"
