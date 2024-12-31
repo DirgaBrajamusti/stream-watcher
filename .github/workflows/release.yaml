@@ -29,6 +29,6 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           goos: ${{ matrix.goos }}
           goarch: ${{ matrix.goarch }}
-          project_path: "./cmd/main"
+          project_path: "./cmd"
           binary_name: "super-bad-stream-watcher"
           extra_files: README.md config.toml.example
