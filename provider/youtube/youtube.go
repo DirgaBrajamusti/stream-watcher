@@ -128,11 +128,28 @@ func GetChannelLive(channelID string) (*common.ChannelLive, error) {
 			if len(title) < 2 {
 				return nil, fmt.Errorf("no title found")
 			}
+
+			reChannelPic := regexp.MustCompile(`<meta name="twitter:image" content="(.*?)"`)
+			channelPic := reChannelPic.FindStringSubmatch(string(body))
+			if len(channelPic) < 2 {
+				return nil, fmt.Errorf("no channel pic found")
+			}
+
+			reChannelName := regexp.MustCompile(`<meta\s+property="og:title"\s+content="([^"]+)">`)
+			channelName := reChannelName.FindStringSubmatch(string(body))
+			if len(channelName) < 2 {
+				return nil, fmt.Errorf("no channel name found")
+			}
+
+			dateCrawled := time.Now().UTC().Format(time.RFC3339Nano)
 			return &common.ChannelLive{
-				Title:        title[1],
-				ChannelID:    channelID,
-				ThumbnailUrl: fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID[1]),
-				VideoID:      videoID[1],
+				Title:          title[1],
+				ChannelID:      channelID,
+				ThumbnailUrl:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID[1]),
+				VideoID:        videoID[1],
+				ChannelName:    channelName[1],
+				ChannelPicture: channelPic[1],
+				DateCrawled:    dateCrawled,
 			}, nil
 		}
 	}
