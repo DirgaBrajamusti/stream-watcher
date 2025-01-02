@@ -17,11 +17,11 @@ jobs:
       - name: Install dependencies
         run: |
           cd helpers/webserver/frontend
-          npm install
+          yarn install
       - name: Build frontend
         run: |
           cd helpers/webserver/frontend
-          npm run build
+          yarn build
       - name: Upload build artifacts
         uses: actions/upload-artifact@v3
         with:
