@@ -5,8 +5,32 @@ on:
     types: [created]
 
 jobs:
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16'
+      - name: Install dependencies
+        run: |
+          cd helpers/webserver/frontend
+          npm install
+      - name: Build frontend
+        run: |
+          cd helpers/webserver/frontend
+          npm run build
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: frontend-build
+          path: helpers/webserver/frontend/dist
+
   releases-matrix:
     name: Release Go Binary
+    needs: build-frontend
     permissions:
       contents: write
       packages: write
