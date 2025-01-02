@@ -3,7 +3,6 @@ package ytdlp
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -13,6 +12,7 @@ import (
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
 	"strings"
+	"sync"
 
 	"github.com/kataras/golog"
 )
@@ -36,13 +36,13 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		fmt.Println("Error creating StdoutPipe:", err)
+		golog.Debug("[yt-dlp] Error creating StdoutPipe:", err)
 		return
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		fmt.Println("Error creating StderrPipe:", err)
+		golog.Debug("[yt-dlp] Error creating StderrPipe:", err)
 		return
 	}
 
@@ -50,18 +50,22 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		log.Printf("Failed to start command: %v", err)
+		golog.Warn("[yt-dlp] Failed to start command: ", err)
 		return
 	}
 	outputBuffer := make([]byte, 4096)
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// Read stdout
 	go func() {
+		defer wg.Done()
 		for {
 			n, err := stdout.Read(outputBuffer)
 			if err != nil {
 				if err != io.EOF {
-					fmt.Println("Error reading stdout:", err)
+					golog.Debug("[yt-dlp] Error reading stdout:", err)
 				}
 				return
 			}
@@ -78,11 +82,12 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	// Read stderr (in case progress is written to stderr)
 	go func() {
+		defer wg.Done()
 		for {
 			n, err := stderr.Read(outputBuffer)
 			if err != nil {
 				if err != io.EOF {
-					fmt.Println("Error reading stderr:", err)
+					golog.Debug("[yt-dlp] Error reading stderr:", err)
 				}
 				return
 			}
@@ -92,21 +97,22 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 			for _, line := range lines {
 				line = strings.TrimSpace(line)
-				// golog.Debug("[yt-dlp] output: " + line)
+				golog.Debug("[yt-dlp] output: " + line)
 				parseOutput(line, channelLive.VideoID)
 			}
 		}
 	}()
 
+	wg.Wait()
+
 	if err := cmd.Wait(); err != nil {
 		golog.Warn("[yt-dlp] Error waiting for command to finish: ", err)
 	}
 
-	golog.Info("[yt-dlp] Download finished")
+	golog.Debug("[yt-dlp] Download finished")
 }
 
 func parseOutput(output string, videoId string) {
-	// golog.Info("Parsing output: ", output)
 	common.DownloadJobsLock.Lock()
 	defer common.DownloadJobsLock.Unlock()
 

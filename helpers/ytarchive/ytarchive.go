@@ -3,7 +3,6 @@ package ytarchive
 import (
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -14,6 +13,7 @@ import (
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
 	"strings"
+	"sync"
 
 	"github.com/kataras/golog"
 )
@@ -39,13 +39,13 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		fmt.Println("Error creating StdoutPipe:", err)
+		golog.Debug("[ytarchive] Error creating StdoutPipe:", err)
 		return
 	}
 
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		fmt.Println("Error creating StderrPipe:", err)
+		golog.Debug("[ytarchive] Error creating StderrPipe:", err)
 		return
 	}
 
@@ -53,18 +53,22 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
-		log.Printf("Failed to start command: %v", err)
+		golog.Warn("[ytarchive] Failed to start command: ", err)
 		return
 	}
 	outputBuffer := make([]byte, 4096)
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// Read stdout
 	go func() {
+		defer wg.Done()
 		for {
 			n, err := stdout.Read(outputBuffer)
 			if err != nil {
 				if err != io.EOF {
-					fmt.Println("Error reading stdout:", err)
+					golog.Debug("[ytarchive] Error reading stdout:", err)
 				}
 				return
 			}
@@ -81,11 +85,12 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 
 	// Read stderr (in case progress is written to stderr)
 	go func() {
+		defer wg.Done()
 		for {
 			n, err := stderr.Read(outputBuffer)
 			if err != nil {
 				if err != io.EOF {
-					fmt.Println("Error reading stderr:", err)
+					golog.Debug("[ytarchive] Error reading stderr:", err)
 				}
 				return
 			}
@@ -101,11 +106,13 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 		}
 	}()
 
+	wg.Wait()
+
 	if err := cmd.Wait(); err != nil {
-		fmt.Println("Error waiting for command to finish:", err)
+		golog.Warn("[ytarchive] Error waiting for command to finish:", err)
 	}
 
-	fmt.Println("Download finished")
+	golog.Debug("[ytarchive] Exited")
 }
 
 func parseOutput(output string, videoId string) {
@@ -135,7 +142,6 @@ func parseOutput(output string, videoId string) {
 		if err := moveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
 			golog.Warn("[ytarchive] Failed to move file: ", err)
 		}
-		// os.Rename(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename)
 		common.DownloadJobs[videoId].FinalFile = common.DownloadJobs[videoId].OutPath + "/" + filename
 		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelName, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Done")
 	} else if strings.Contains(output, "Error retrieving player response") || strings.Contains(output, "unable to retrieve") || strings.Contains(output, "error writing the muxcmd file") || strings.Contains(output, "Something must have gone wrong with ffmpeg") || strings.Contains(output, "At least one error occurred") || strings.Contains(output, "ERROR: ") {
