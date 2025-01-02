@@ -14,6 +14,8 @@ import (
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/ytarchive"
+	"streamwatcher/helpers/ytdlp"
+	"streamwatcher/provider/twitch"
 	"streamwatcher/provider/youtube"
 	"strings"
 	"sync"
@@ -78,23 +80,51 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	channelLive, err := youtube.GetVideoDetailsFromID(*youtube.ParseVideoID(parsedUrl))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	go func() {
-		golog.Info("[webserver] Added task for video from api: ", channelLive.VideoID)
-		ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, task.OutPath)
-	}()
+	if parsedUrl.Host == "twitch.tv" {
+		twitchUsername := strings.TrimPrefix(parsedUrl.Path, "/")
+		channelLive, err := twitch.GetChannelInfo(twitchUsername)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		go func() {
+			golog.Info("[webserver] Added task for twitch: ", twitchUsername)
+			ytdlp.StartDownload("https://twitch.tv/"+twitchUsername, []string{}, channelLive, task.OutPath)
+		}()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		response := map[string]interface{}{
+			"message": "Task added successfully",
+			"status":  channelLive,
+		}
+		json.NewEncoder(w).Encode(response)
+	} else {
+		url := youtube.ParseVideoID(parsedUrl)
+		if url == nil {
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	response := map[string]interface{}{
-		"message": "Task added successfully",
-		"status":  channelLive,
+			http.Error(w, "Invalid YouTube URL", http.StatusBadRequest)
+			return
+		} else {
+			channelLive, err := youtube.GetVideoDetailsFromID(*url)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			go func() {
+				golog.Info("[webserver] Added task for video from api: ", channelLive.VideoID)
+				ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, task.OutPath)
+			}()
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			response := map[string]interface{}{
+				"message": "Task added successfully",
+				"status":  channelLive,
+			}
+			json.NewEncoder(w).Encode(response)
+		}
 	}
-	json.NewEncoder(w).Encode(response)
+
 }
 func getDownloadJobs(w http.ResponseWriter, r *http.Request) {
 	common.DownloadJobsLock.Lock()

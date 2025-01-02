@@ -78,6 +78,7 @@ func GetChannelInfo(username string) (*common.ChannelLive, error) {
 	if streamInfo == nil {
 		return nil, nil
 	}
+
 	return &common.ChannelLive{
 		Title:          streamInfo.Title,
 		ChannelID:      username,
