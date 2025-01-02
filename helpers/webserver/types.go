@@ -31,3 +31,17 @@ type Response struct {
 	Task   Task   `json:"task"`
 	Status Status `json:"status"`
 }
+
+// Get Config
+type Channel struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Filters          []string `json:"filters"`
+	MatchDescription bool     `json:"match_description"`
+	Outpath          string   `json:"outpath"`
+	PictureURL       string   `json:"picture_url"`
+}
+
+type ConfigResponse struct {
+	Channel []Channel `json:"channel"`
+}

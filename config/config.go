@@ -2,6 +2,7 @@
 package config
 
 import (
+	"github.com/fsnotify/fsnotify"
 	"github.com/kataras/golog"
 	"github.com/spf13/viper"
 )
@@ -79,4 +80,12 @@ func LoadConfig() {
 	if err := viper.Unmarshal(&AppConfig); err != nil {
 		golog.Fatal("Unable to decode into struct, ", err)
 	}
+
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		golog.Info("Config file changed")
+		if err := viper.Unmarshal(&AppConfig); err != nil {
+			golog.Error("Error reloading config:", err)
+		}
+	})
+	viper.WatchConfig()
 }

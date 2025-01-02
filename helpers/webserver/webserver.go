@@ -1,10 +1,14 @@
 package webserver
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"streamwatcher/common"
@@ -18,14 +22,44 @@ import (
 	"github.com/kataras/golog"
 )
 
-func StartServer() {
-	http.HandleFunc("/api/tasks", getDownloadJobs)
-	http.HandleFunc("/api/task", addTask)
+//go:embed frontend/dist/*
+var staticFiles embed.FS
 
-	http.Handle("/", http.FileServer(http.Dir("./helpers/webserver/frontend/dist")))
-	golog.Info(http.ListenAndServe(fmt.Sprintf("%s:%s", config.AppConfig.Webserver.Host, config.AppConfig.Webserver.Port), nil))
+// spaFileSystem is a custom file system wrapper for SPA
+type spaFileSystem struct {
+	http.FileSystem
+	index string
 }
 
+func (fs spaFileSystem) Open(path string) (http.File, error) {
+	f, err := fs.FileSystem.Open(path)
+	if err != nil {
+		return fs.FileSystem.Open(fs.index)
+	}
+	return f, err
+}
+
+func StartServer() {
+	// API routes
+	http.HandleFunc("/api/tasks", getDownloadJobs)
+	http.HandleFunc("/api/task", addTask)
+	http.HandleFunc("/api/config/toml", tomlConfig)
+	http.HandleFunc("/api/config", getConfig)
+
+	// Static files handling
+	staticFS, err := fs.Sub(staticFiles, "frontend/dist")
+	if err != nil {
+		golog.Fatal(err)
+	}
+
+	spa := spaFileSystem{
+		FileSystem: http.FS(staticFS),
+		index:      "index.html",
+	}
+
+	http.Handle("/", http.FileServer(spa))
+	golog.Info(http.ListenAndServe(fmt.Sprintf("%s:%s", config.AppConfig.Webserver.Host, config.AppConfig.Webserver.Port), nil))
+}
 func addTask(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
@@ -66,12 +100,10 @@ func getDownloadJobs(w http.ResponseWriter, r *http.Request) {
 	common.DownloadJobsLock.Lock()
 	defer common.DownloadJobsLock.Unlock()
 
-	// Convert the DownloadJobs map to a slice for JSON response
-	// jobsSlice := make([]*common.DownloadJob, 0, len(common.DownloadJobs))
-	// for _, job := range common.DownloadJobs {
-	// 	jobsSlice = append(jobsSlice, job)
-	// }
 	jobsSlice := convertDownloadJobsToResponse(common.DownloadJobs)
+	if jobsSlice == nil {
+		jobsSlice = []Response{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(jobsSlice)
@@ -156,4 +188,57 @@ func parseOutput(output string, sizePattern, fragmentsPattern *regexp.Regexp) (m
 		return result, nil
 	}
 	return nil, fmt.Errorf("output does not start with expected pattern")
+}
+
+func getConfig(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var response ConfigResponse
+
+	for _, channel := range config.AppConfig.YouTubeChannel {
+		response.Channel = append(response.Channel, Channel{
+			ID:               channel.ID,
+			Name:             channel.Name,
+			Filters:          channel.Filters,
+			MatchDescription: false,
+			Outpath:          channel.OutPath,
+			PictureURL:       "",
+		})
+	}
+
+	json.NewEncoder(w).Encode(response)
+}
+
+func tomlConfig(w http.ResponseWriter, r *http.Request) {
+	filePath := "./config.toml"
+
+	switch r.Method {
+	case http.MethodGet:
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			http.Error(w, "Unable to read config file", http.StatusInternalServerError)
+			golog.Warn("Error reading config file:", err)
+			return
+		}
+		w.Write(content)
+
+	case http.MethodPut:
+		content, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "Unable to read request body", http.StatusBadRequest)
+			golog.Warn("Error reading request body:", err)
+			return
+		}
+
+		err = os.WriteFile(filePath, content, 0644)
+		if err != nil {
+			http.Error(w, "Unable to write to config file", http.StatusInternalServerError)
+			golog.Warn("Error writing to config file:", err)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+	}
 }
