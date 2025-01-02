@@ -3,10 +3,13 @@ package common
 import "sync"
 
 type ChannelLive struct {
-	Title        string
-	ThumbnailUrl string
-	ChannelID    string
-	VideoID      string
+	Title          string
+	ThumbnailUrl   string
+	ChannelID      string
+	VideoID        string
+	ChannelName    string
+	ChannelPicture string
+	DateCrawled    string
 }
 
 type DownloadJob struct {
@@ -15,6 +18,7 @@ type DownloadJob struct {
 	Status      string
 	Output      string
 	OutPath     string
+	FinalFile   string
 }
 
 var (

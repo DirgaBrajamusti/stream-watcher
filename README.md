@@ -63,5 +63,6 @@ touch cookies.txt
 - [golog](https://github.com/kataras/golog)
 - [Vite](https://vitejs.dev/)
 - [React](https://reactjs.org/)
+- [Hoshinova](https://github.com/HoloArchivists/hoshinova)
 
 ---

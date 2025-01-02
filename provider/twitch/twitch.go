@@ -72,16 +72,20 @@ func GetChannelInfo(username string) (*common.ChannelLive, error) {
 	}
 
 	streamInfo := resData.Data.User.Stream
-	// streamProfile := resData.Data.User
+	streamProfilePic := resData.Data.User.ProfileImageURL
+	DateCrawled := time.Now().UTC().Format(time.RFC3339Nano)
 
 	if streamInfo == nil {
 		return nil, nil
 	}
 	return &common.ChannelLive{
-		Title:        streamInfo.Title,
-		ChannelID:    username,
-		ThumbnailUrl: streamInfo.PreviewImageURL,
-		VideoID:      streamInfo.ID,
+		Title:          streamInfo.Title,
+		ChannelID:      username,
+		ThumbnailUrl:   streamInfo.PreviewImageURL,
+		VideoID:        streamInfo.ID,
+		ChannelName:    username,
+		ChannelPicture: streamProfilePic,
+		DateCrawled:    DateCrawled,
 	}, nil
 }
 

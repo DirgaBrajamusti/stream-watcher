@@ -49,7 +49,7 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 		return
 	}
 
-	common.AddDownloadJob(channelLive.VideoID, *channelLive, "Starting", "", outPath)
+	common.AddDownloadJob(channelLive.VideoID, *channelLive, "Idle", "", outPath)
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
@@ -136,6 +136,7 @@ func parseOutput(output string, videoId string) {
 			golog.Warn("[ytarchive] Failed to move file: ", err)
 		}
 		// os.Rename(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename)
+		common.DownloadJobs[videoId].FinalFile = common.DownloadJobs[videoId].OutPath + "/" + filename
 		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelID, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Done")
 	} else if strings.Contains(output, "Error retrieving player response") || strings.Contains(output, "unable to retrieve") || strings.Contains(output, "error writing the muxcmd file") || strings.Contains(output, "Something must have gone wrong with ffmpeg") || strings.Contains(output, "At least one error occurred") || strings.Contains(output, "ERROR: ") {
 		common.DownloadJobs[videoId].Status = "Error"

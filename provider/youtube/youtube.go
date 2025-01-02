@@ -192,11 +192,30 @@ func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
 		return nil, fmt.Errorf("no channel id found")
 	}
 
+	reChannelPic := regexp.MustCompile(`<meta name="twitter:image" content="(.*?)"`)
+	channelPic := reChannelPic.FindStringSubmatch(string(body))
+
+	if len(channelPic) < 2 {
+		return nil, fmt.Errorf("no channel pic found")
+	}
+
+	reChannelName := regexp.MustCompile(`"channelName":"(.*?)"`)
+	channelName := reChannelName.FindStringSubmatch(string(body))
+
+	if len(channelName) < 2 {
+		return nil, fmt.Errorf("no channel name found")
+	}
+
+	dateCrawled := time.Now().UTC().Format(time.RFC3339Nano)
+
 	return &common.ChannelLive{
-		Title:        title[1],
-		ChannelID:    channelId[1],
-		ThumbnailUrl: fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID),
-		VideoID:      videoID,
+		Title:          title[1],
+		ChannelID:      channelId[1],
+		ThumbnailUrl:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID),
+		VideoID:        videoID,
+		ChannelName:    channelName[1],
+		ChannelPicture: channelPic[1],
+		DateCrawled:    dateCrawled,
 	}, nil
 }
 

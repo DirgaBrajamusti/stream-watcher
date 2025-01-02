@@ -16,15 +16,15 @@ type Task struct {
 }
 
 type Status struct {
-	Version        string  `json:"version"`
-	State          string  `json:"state"`
-	LastOutput     string  `json:"last_output"`
-	LastUpdate     *string `json:"last_update"`
-	VideoFragments int     `json:"video_fragments"`
-	AudioFragments int     `json:"audio_fragments"`
-	TotalSize      string  `json:"total_size"`
-	VideoQuality   string  `json:"video_quality"`
-	OutputFile     string  `json:"output_file"`
+	Version        string `json:"version"`
+	State          string `json:"state"`
+	LastOutput     string `json:"last_output"`
+	LastUpdate     string `json:"last_update"`
+	VideoFragments any    `json:"video_fragments"`
+	AudioFragments any    `json:"audio_fragments"`
+	TotalSize      any    `json:"total_size"`
+	VideoQuality   any    `json:"video_quality"`
+	OutputFile     any    `json:"output_file"`
 }
 
 type Response struct {

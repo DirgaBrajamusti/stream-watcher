@@ -5,17 +5,22 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/ytarchive"
 	"streamwatcher/provider/youtube"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/kataras/golog"
 )
 
 func StartServer() {
-	http.HandleFunc("/api/jobs", getDownloadJobs)
-	http.HandleFunc("/api/addtask", addTask)
+	http.HandleFunc("/api/tasks", getDownloadJobs)
+	http.HandleFunc("/api/task", addTask)
 
 	http.Handle("/", http.FileServer(http.Dir("./helpers/webserver/frontend/dist")))
 	golog.Info(http.ListenAndServe(fmt.Sprintf("%s:%s", config.AppConfig.Webserver.Host, config.AppConfig.Webserver.Port), nil))
@@ -74,30 +79,81 @@ func getDownloadJobs(w http.ResponseWriter, r *http.Request) {
 
 func convertDownloadJobsToResponse(jobs map[string]*common.DownloadJob) []Response {
 	var responses []Response
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Precompile regex patterns
+	sizePattern := regexp.MustCompile(`size=\s*([\d.]+[KMG]i?B?)\s*time=.*bitrate=([\d.]+[kMG]?bits/s)\s*speed=([\d.]+x)`)
+	fragmentsPattern := regexp.MustCompile(`Video Fragments:\s*(\d+);\s*Audio Fragments:\s*(\d+);\s*Total Downloaded:\s*([\d.]+[KMG]i?B?)`)
+
 	for _, job := range jobs {
-		response := Response{
-			Task: Task{
-				Title:           job.ChannelLive.Title,
-				VideoID:         job.VideoID,
-				VideoPicture:    job.ChannelLive.ThumbnailUrl,
-				ChannelName:     "Channel Name Placeholder",
-				ChannelID:       job.ChannelLive.ChannelID,
-				ChannelPicture:  "Channel Picture Placeholder",
-				OutputDirectory: job.OutPath,
-			},
-			Status: Status{
-				Version:        "0.5.0",
-				State:          job.Status,
-				LastOutput:     job.Output,
-				LastUpdate:     nil,
-				VideoFragments: 0,
-				AudioFragments: 0,
-				TotalSize:      "0",
-				VideoQuality:   "best",
-				OutputFile:     job.OutPath,
-			},
-		}
-		responses = append(responses, response)
+		wg.Add(1)
+		go func(job *common.DownloadJob) {
+			defer wg.Done()
+			outputParsed, _ := parseOutput(job.Output, sizePattern, fragmentsPattern)
+			response := Response{
+				Task: Task{
+					Title:           job.ChannelLive.Title,
+					VideoID:         job.VideoID,
+					VideoPicture:    job.ChannelLive.ThumbnailUrl,
+					ChannelName:     job.ChannelLive.ChannelName,
+					ChannelID:       job.ChannelLive.ChannelID,
+					ChannelPicture:  job.ChannelLive.ChannelPicture,
+					OutputDirectory: job.OutPath,
+				},
+				Status: Status{
+					Version:        "",
+					State:          job.Status,
+					LastOutput:     job.Output,
+					LastUpdate:     job.ChannelLive.DateCrawled,
+					VideoFragments: outputParsed["VideoFragments"],
+					AudioFragments: outputParsed["AudioFragments"],
+					TotalSize:      outputParsed["TotalSize"],
+					VideoQuality:   "",
+					OutputFile:     job.FinalFile,
+				},
+			}
+			mu.Lock()
+			responses = append(responses, response)
+			mu.Unlock()
+		}(job)
 	}
+
+	wg.Wait()
+
+	sort.Slice(responses, func(i, j int) bool {
+		timeI, _ := time.Parse(time.RFC3339, responses[i].Status.LastUpdate)
+		timeJ, _ := time.Parse(time.RFC3339, responses[j].Status.LastUpdate)
+		return timeI.Before(timeJ)
+	})
+
 	return responses
+}
+
+func parseOutput(output string, sizePattern, fragmentsPattern *regexp.Regexp) (map[string]string, error) {
+	if strings.HasPrefix(output, "size=") {
+		matches := sizePattern.FindStringSubmatch(output)
+		if len(matches) != 4 {
+			return nil, fmt.Errorf("failed to parse output")
+		}
+
+		result := map[string]string{
+			"TotalSize":      matches[1],
+			"VideoFragments": "0",
+			"AudioFragments": "0",
+		}
+		return result, nil
+	} else if strings.HasPrefix(output, "Video Fragments: ") {
+		matches := fragmentsPattern.FindStringSubmatch(output)
+		if len(matches) != 4 {
+			return nil, fmt.Errorf("failed to parse output")
+		}
+		result := map[string]string{
+			"TotalSize":      matches[3],
+			"VideoFragments": matches[1],
+			"AudioFragments": matches[2],
+		}
+		return result, nil
+	}
+	return nil, fmt.Errorf("output does not start with expected pattern")
 }
