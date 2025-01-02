@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"runtime"
 	"streamwatcher/common"
 	"streamwatcher/config"
@@ -98,7 +99,7 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	}()
 
 	if err := cmd.Wait(); err != nil {
-		golog.Warn("Error waiting for command to finish: ", err)
+		golog.Warn("[yt-dlp] Error waiting for command to finish: ", err)
 	}
 
 	golog.Info("[yt-dlp] Download finished")
@@ -121,40 +122,25 @@ func parseOutput(output string, videoId string) {
 		filePath := strings.Split(output, "Final file: ")[1]
 		filename := path.Base(filePath)
 		if err := moveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
-			golog.Warn("Failed to move file: ", err)
+			golog.Warn("[yt-dlp] Failed to move file: ", err)
 		}
 		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelID, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Done")
 	}
 }
 
 func moveFile(sourcePath, destPath string) error {
-	// Open the source file
-	sourceFile, err := os.Open(sourcePath)
+	// Create the destination directory if it does not exist
+	destDir := filepath.Dir(destPath)
+	err := os.MkdirAll(destDir, os.ModePerm)
 	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
-	}
-	defer sourceFile.Close()
-
-	// Create the destination file
-	golog.Debug("Creating destination file: ", destPath)
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copy the contents from the source file to the destination file
-	golog.Debug("Copying file contents...")
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
-		return fmt.Errorf("failed to copy file contents: %w", err)
+		return fmt.Errorf("[ytdlp] failed to create destination directory: %w", err)
 	}
 
-	// Remove the source file
-	err = os.Remove(sourcePath)
-	golog.Debug("Removing source file: ", sourcePath)
+	// Rename the source file to the destination path
+	golog.Debug("[ytdlp] Renaming file from ", sourcePath, " to ", destPath)
+	err = os.Rename(sourcePath, destPath)
 	if err != nil {
-		return fmt.Errorf("failed to remove source file: %w", err)
+		return fmt.Errorf("[ytdlp] failed to rename file: %w", err)
 	}
 
 	return nil

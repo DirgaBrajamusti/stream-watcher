@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"streamwatcher/common"
@@ -22,7 +23,7 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var allArgs []string
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Args...)
-	allArgs = append(allArgs, "--temporary-dir", config.AppConfig.YTArchive.WorkingDirectory)
+	// allArgs = append(allArgs, "--temporary-dir", config.AppConfig.YTArchive.WorkingDirectory)
 	allArgs = append(allArgs, "--start-delay", config.AppConfig.YTArchive.DelayStart)
 	allArgs = append(allArgs, url)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Quality)
@@ -30,8 +31,10 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	if runtime.GOOS == "windows" {
 		cmdArgs := append([]string{"/C", "ytarchive"}, allArgs...)
 		cmd = exec.Command("cmd", cmdArgs...)
+		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
 	} else {
 		cmd = exec.Command("ytarchive", allArgs...)
+		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -142,33 +145,18 @@ func parseOutput(output string, videoId string) {
 }
 
 func moveFile(sourcePath, destPath string) error {
-	// Open the source file
-	sourceFile, err := os.Open(sourcePath)
+	// Create the destination directory if it does not exist
+	destDir := filepath.Dir(destPath)
+	err := os.MkdirAll(destDir, os.ModePerm)
 	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to open source file: %w", err)
-	}
-	defer sourceFile.Close()
-
-	// Create the destination file
-	golog.Debug("[ytarchive] Creating destination file: ", destPath)
-	destFile, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to create destination file: %w", err)
-	}
-	defer destFile.Close()
-
-	// Copy the contents from the source file to the destination file
-	golog.Debug("[ytarchive] Copying file contents...")
-	_, err = io.Copy(destFile, sourceFile)
-	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to copy file contents: %w", err)
+		return fmt.Errorf("[ytarchive] failed to create destination directory: %w", err)
 	}
 
-	// Remove the source file
-	err = os.Remove(sourcePath)
-	golog.Debug("[ytarchive] Removing source file: ", sourcePath)
+	// Rename the source file to the destination path
+	golog.Debug("[ytarchive] Renaming file from ", sourcePath, " to ", destPath)
+	err = os.Rename(sourcePath, destPath)
 	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to remove source file: %w", err)
+		return fmt.Errorf("[ytarchive] failed to rename file: %w", err)
 	}
 
 	return nil
