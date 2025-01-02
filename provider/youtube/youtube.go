@@ -199,7 +199,7 @@ func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
 		return nil, fmt.Errorf("no channel pic found")
 	}
 
-	reChannelName := regexp.MustCompile(`"channelName":"(.*?)"`)
+	reChannelName := regexp.MustCompile(`ChannelName":"(.*?)"`)
 	channelName := reChannelName.FindStringSubmatch(string(body))
 
 	if len(channelName) < 2 {
