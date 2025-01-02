@@ -233,7 +233,7 @@ func CheckLiveAllChannel() {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
 				if videoInRegex {
 					golog.Info("[youtube] live is in regex: ", channel.Name)
-					discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
+					discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
 					go func() {
 						ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
 					}()
