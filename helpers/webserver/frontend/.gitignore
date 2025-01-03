@@ -24,4 +24,4 @@ dist-ssr
 *.sw?
 
 # Auto-generated bindings
-src/bindings/
+# src/bindings/
