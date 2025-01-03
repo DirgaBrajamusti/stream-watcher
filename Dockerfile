@@ -15,7 +15,7 @@ RUN set -ex; \
 FROM golang:1.23-alpine as build
 WORKDIR /app
 COPY . .
-COPY --from=web /helpers/webserver/frontend/dist /helpers/webserver/frontend/dist
+COPY --from=web /helpers/webserver/frontend/dist /app/helpers/webserver/frontend/dist
 RUN go build -o super-bad-stream-watcher ./cmd
 
 FROM alpine as runner
