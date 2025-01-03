@@ -16,20 +16,27 @@ import (
 func archivers() {
 	golog.Debug("[System] Checking for live channels")
 	if config.AppConfig.Archive.YouTube {
-		golog.Debug("[System] Checking for live Youtube Channels")
-		youtube.CheckLiveAllChannel()
+		go func() {
+			golog.Debug("[System] Checking for live Youtube Channels")
+			if youtube.IsCheckingInProgress {
+				golog.Debug("[System] Youtube Checker is in progress, skipping this check")
+			} else {
+				youtube.CheckLiveAllChannel()
+			}
+		}()
 	}
 	if config.AppConfig.Archive.Twitch {
-		golog.Debug("[System] Checking for live Twitch Channels")
-		twitch.CheckLiveAllChannel()
+		go func() {
+			golog.Debug("[System] Checking for live Twitch Channels")
+			twitch.CheckLiveAllChannel()
+		}()
 	}
 }
 
 func initialized() {
-	golog.Info("Initializing...")
+	golog.Debug("[System] Creating directories if not exists")
 	createDirIfNotExist("temp")
 	createDirIfNotExist("downloads")
-	golog.Info("Initialized")
 }
 
 func createDirIfNotExist(dir string) {
@@ -52,7 +59,7 @@ func main() {
 		golog.SetLevel("debug")
 	}
 
-	golog.Info("Starting...")
+	golog.Infof("[System] Starting...")
 	initialized()
 	archivers()
 

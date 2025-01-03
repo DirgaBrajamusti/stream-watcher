@@ -19,6 +19,9 @@ import (
 	"github.com/kataras/golog"
 )
 
+// IsCheckingInProgress is a flag to check if the checker is in progress
+var IsCheckingInProgress bool
+
 // NetscapeCookie represents a cookie in Netscape format
 type NetscapeCookie struct {
 	Domain     string
@@ -237,6 +240,10 @@ func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
 }
 
 func CheckLiveAllChannel() {
+	if IsCheckingInProgress {
+		return
+	}
+	IsCheckingInProgress = true
 	for i, channel := range config.AppConfig.YouTubeChannel {
 		golog.Info("[youtube] checking live: ", channel.Name)
 		channelLive, err := GetChannelLive(channel.ID)
@@ -262,9 +269,11 @@ func CheckLiveAllChannel() {
 			golog.Debug("[youtube] channel is not live: ", channel.Name)
 		}
 		if i < len(config.AppConfig.YouTubeChannel)-1 {
+			golog.Debug("[youtube] sleeping before checking next channel for ", config.AppConfig.Archive.Checker, "minutes")
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
 	}
+	IsCheckingInProgress = false
 }
 
 func ParseVideoID(parsedURI *url.URL) *string {
