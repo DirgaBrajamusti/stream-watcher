@@ -1,0 +1,12 @@
+version: "3.3"
+services:
+  stream-watcher:
+    container_name: stream-watcher
+    volumes:
+      - ./downloads:/app/downloads
+      - ./temp:/app/temp
+      - ./config.toml:/app/config.toml
+      - ./cookies.txt:/app/cookies.txt
+    ports:
+      - 3000:3000
+    image: ghcr.io/dirgabrajamusti/stream-watcher
