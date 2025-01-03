@@ -1,12 +1,8 @@
 package ytdlp
 
 import (
-	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"runtime"
 	"streamwatcher/common"
 	"streamwatcher/config"
@@ -58,50 +54,10 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Read stdout
-	go func() {
-		defer wg.Done()
-		for {
-			n, err := stdout.Read(outputBuffer)
-			if err != nil {
-				if err != io.EOF {
-					golog.Debug("[yt-dlp] Error reading stdout:", err)
-				}
-				return
-			}
-
-			output := string(outputBuffer[:n])
-			lines := strings.Split(output, "\n")
-
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				parseOutput(line, channelLive.VideoID)
-			}
-		}
-	}()
+	go common.ReadStdout(stdout, outputBuffer, parseOutput, channelLive.VideoID, &wg, "yt-dlp")
 
 	// Read stderr (in case progress is written to stderr)
-	go func() {
-		defer wg.Done()
-		for {
-			n, err := stderr.Read(outputBuffer)
-			if err != nil {
-				if err != io.EOF {
-					golog.Debug("[yt-dlp] Error reading stderr:", err)
-				}
-				return
-			}
-
-			output := string(outputBuffer[:n])
-			lines := strings.Split(output, "\n")
-
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				golog.Debug("[yt-dlp] output: " + line)
-				parseOutput(line, channelLive.VideoID)
-			}
-		}
-	}()
+	go common.ReadStderr(stderr, outputBuffer, parseOutput, channelLive.VideoID, &wg, "yt-dlp")
 
 	wg.Wait()
 
@@ -127,28 +83,10 @@ func parseOutput(output string, videoId string) {
 		common.DownloadJobs[videoId].Output = output
 		filePath := strings.Split(output, "Final file: ")[1]
 		filename := path.Base(filePath)
-		if err := moveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
+		if err := common.MoveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
 			golog.Warn("[yt-dlp] Failed to move file: ", err)
 		}
 		common.DownloadJobs[videoId].FinalFile = common.DownloadJobs[videoId].OutPath + "/" + filename
 		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelName, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Done")
 	}
-}
-
-func moveFile(sourcePath, destPath string) error {
-	// Create the destination directory if it does not exist
-	destDir := filepath.Dir(destPath)
-	err := os.MkdirAll(destDir, os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("[ytdlp] failed to create destination directory: %w", err)
-	}
-
-	// Rename the source file to the destination path
-	golog.Debug("[ytdlp] Renaming file from ", sourcePath, " to ", destPath)
-	err = os.Rename(sourcePath, destPath)
-	if err != nil {
-		return fmt.Errorf("[ytdlp] failed to rename file: %w", err)
-	}
-
-	return nil
 }

@@ -13,12 +13,15 @@ type ChannelLive struct {
 }
 
 type DownloadJob struct {
-	VideoID     string
-	ChannelLive ChannelLive
-	Status      string
-	Output      string
-	OutPath     string
-	FinalFile   string
+	VideoID        string
+	ChannelLive    ChannelLive
+	Status         string
+	Output         string
+	AudioFragments string
+	VideoFragments string
+	TotalSize      string
+	OutPath        string
+	FinalFile      string
 }
 
 var (

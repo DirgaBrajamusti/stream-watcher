@@ -1,12 +1,8 @@
 package ytarchive
 
 import (
-	"fmt"
-	"io"
-	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"regexp"
 	"runtime"
 	"streamwatcher/common"
@@ -61,50 +57,10 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Read stdout
-	go func() {
-		defer wg.Done()
-		for {
-			n, err := stdout.Read(outputBuffer)
-			if err != nil {
-				if err != io.EOF {
-					golog.Debug("[ytarchive] Error reading stdout:", err)
-				}
-				return
-			}
-
-			output := string(outputBuffer[:n])
-			lines := strings.Split(output, "\n")
-
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				parseOutput(line, channelLive.VideoID)
-			}
-		}
-	}()
+	go common.ReadStdout(stdout, outputBuffer, parseOutput, channelLive.VideoID, &wg, "ytarchive")
 
 	// Read stderr (in case progress is written to stderr)
-	go func() {
-		defer wg.Done()
-		for {
-			n, err := stderr.Read(outputBuffer)
-			if err != nil {
-				if err != io.EOF {
-					golog.Debug("[ytarchive] Error reading stderr:", err)
-				}
-				return
-			}
-
-			output := string(outputBuffer[:n])
-			lines := strings.Split(output, "\n")
-
-			for _, line := range lines {
-				line = strings.TrimSpace(line)
-				golog.Debug("[ytarchive] output: " + line)
-				parseOutput(line, channelLive.VideoID)
-			}
-		}
-	}()
+	go common.ReadStderr(stderr, outputBuffer, parseOutput, channelLive.VideoID, &wg, "ytarchive")
 
 	wg.Wait()
 
@@ -118,15 +74,22 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 func parseOutput(output string, videoId string) {
 	common.DownloadJobsLock.Lock()
 	defer common.DownloadJobsLock.Unlock()
-	if strings.Contains(output, "Video Title") {
+	if strings.Contains(output, "Video Fragments") {
+		common.DownloadJobs[videoId].Status = "Downloading"
+		parts := strings.Split(output, ";")
+		videoFragments := strings.TrimSpace(strings.Split(parts[0], ":")[1])
+		audioFragments := strings.TrimSpace(strings.Split(parts[1], ":")[1])
+		totalDownloaded := strings.TrimSpace(strings.Split(parts[2], ":")[1])
+		common.DownloadJobs[videoId].Output = output
+		common.DownloadJobs[videoId].VideoFragments = videoFragments
+		common.DownloadJobs[videoId].AudioFragments = audioFragments
+		common.DownloadJobs[videoId].TotalSize = totalDownloaded
+	} else if strings.Contains(output, "Video Title") {
 		re := regexp.MustCompile(`Video Title:\s*(.*?)\s*$`)
 		matches := re.FindStringSubmatch(output)
 		if len(matches) > 1 {
 			common.DownloadJobs[videoId].ChannelLive.Title = matches[1]
 		}
-	} else if strings.Contains(output, "Video Fragments") {
-		common.DownloadJobs[videoId].Status = "Downloading"
-		common.DownloadJobs[videoId].Output = output
 	} else if strings.Contains(output, "Waiting for stream") {
 		common.DownloadJobs[videoId].Output = output
 		common.DownloadJobs[videoId].Status = "Waiting"
@@ -139,7 +102,7 @@ func parseOutput(output string, videoId string) {
 		common.DownloadJobs[videoId].Output = output
 		filePath := strings.Split(output, "Final file: ")[1]
 		filename := path.Base(filePath)
-		if err := moveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
+		if err := common.MoveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
 			golog.Warn("[ytarchive] Failed to move file: ", err)
 		}
 		common.DownloadJobs[videoId].FinalFile = common.DownloadJobs[videoId].OutPath + "/" + filename
@@ -149,22 +112,4 @@ func parseOutput(output string, videoId string) {
 		common.DownloadJobs[videoId].Output = output
 		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelName, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Error")
 	}
-}
-
-func moveFile(sourcePath, destPath string) error {
-	// Create the destination directory if it does not exist
-	destDir := filepath.Dir(destPath)
-	err := os.MkdirAll(destDir, os.ModePerm)
-	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to create destination directory: %w", err)
-	}
-
-	// Rename the source file to the destination path
-	golog.Debug("[ytarchive] Renaming file from ", sourcePath, " to ", destPath)
-	err = os.Rename(sourcePath, destPath)
-	if err != nil {
-		return fmt.Errorf("[ytarchive] failed to rename file: %w", err)
-	}
-
-	return nil
 }

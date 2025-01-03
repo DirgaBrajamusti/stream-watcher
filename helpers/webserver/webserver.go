@@ -87,6 +87,16 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if channelLive == nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			response := map[string]interface{}{
+				"message": "Task not added",
+				"status":  "Channel maybe offline",
+			}
+			json.NewEncoder(w).Encode(response)
+			return
+		}
 		go func() {
 			golog.Info("[webserver] Added task for twitch: ", twitchUsername)
 			ytdlp.StartDownload("https://twitch.tv/"+twitchUsername, []string{}, channelLive, task.OutPath)
@@ -145,14 +155,13 @@ func convertDownloadJobsToResponse(jobs map[string]*common.DownloadJob) []Respon
 	var wg sync.WaitGroup
 
 	// Precompile regex patterns
-	sizePattern := regexp.MustCompile(`size=\s*([\d.]+[KMG]i?B?)\s*time=.*bitrate=([\d.]+[kMG]?bits/s)\s*speed=([\d.]+x)`)
-	fragmentsPattern := regexp.MustCompile(`Video Fragments:\s*(\d+);\s*Audio Fragments:\s*(\d+);\s*Total Downloaded:\s*([\d.]+[KMG]i?B?)`)
+	// sizePattern := regexp.MustCompile(`size=\s*([\d.]+[KMG]i?B?)\s*time=.*bitrate=([\d.]+[kMG]?bits/s)\s*speed=([\d.]+x)`)
+	// fragmentsPattern := regexp.MustCompile(`Video Fragments:\s*(\d+);\s*Audio Fragments:\s*(\d+);\s*Total Downloaded:\s*([\d.]+[KMG]i?B?)`)
 
 	for _, job := range jobs {
 		wg.Add(1)
 		go func(job *common.DownloadJob) {
 			defer wg.Done()
-			outputParsed, _ := parseOutput(job.Output, sizePattern, fragmentsPattern)
 			response := Response{
 				Task: Task{
 					Title:           job.ChannelLive.Title,
@@ -168,10 +177,10 @@ func convertDownloadJobsToResponse(jobs map[string]*common.DownloadJob) []Respon
 					State:          job.Status,
 					LastOutput:     job.Output,
 					LastUpdate:     job.ChannelLive.DateCrawled,
-					VideoFragments: outputParsed["VideoFragments"],
-					AudioFragments: outputParsed["AudioFragments"],
-					TotalSize:      outputParsed["TotalSize"],
-					VideoQuality:   "",
+					VideoFragments: job.VideoFragments,
+					AudioFragments: job.AudioFragments,
+					TotalSize:      job.TotalSize,
+					VideoQuality:   nil,
 					OutputFile:     job.FinalFile,
 				},
 			}
