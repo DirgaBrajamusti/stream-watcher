@@ -80,7 +80,7 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if parsedUrl.Host == "twitch.tv" {
+	if parsedUrl.Host == "twitch.tv" || parsedUrl.Host == "www.twitch.tv" {
 		twitchUsername := strings.TrimPrefix(parsedUrl.Path, "/")
 		channelLive, err := twitch.GetChannelInfo(twitchUsername)
 		if err != nil {
@@ -111,7 +111,6 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 	} else {
 		url := youtube.ParseVideoID(parsedUrl)
 		if url == nil {
-
 			http.Error(w, "Invalid YouTube URL", http.StatusBadRequest)
 			return
 		} else {
