@@ -22,11 +22,13 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	allArgs = append(allArgs, url)
 
 	if runtime.GOOS == "windows" {
-		cmdArgs := append([]string{"/C", "yt-dlp"}, allArgs...)
+		golog.Debug("[yt-dlp] spawning jobs in windows")
+		cmdArgs := append([]string{"/C", config.AppConfig.YT_DLP.ExecutablePath}, allArgs...)
 		cmd = exec.Command("cmd", cmdArgs...)
 		cmd.Dir = config.AppConfig.YT_DLP.WorkingDirectory
 	} else {
-		cmd = exec.Command("yt-dlp", allArgs...)
+		golog.Debug("[yt-dlp] spawning jobs")
+		cmd = exec.Command(config.AppConfig.YT_DLP.ExecutablePath, allArgs...)
 		cmd.Dir = config.AppConfig.YT_DLP.WorkingDirectory
 	}
 
@@ -69,6 +71,7 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 }
 
 func parseOutput(output string, videoId string) {
+	golog.Debug("[yt-dlp] Parsing output: ", output)
 	common.DownloadJobsLock.Lock()
 	defer common.DownloadJobsLock.Unlock()
 

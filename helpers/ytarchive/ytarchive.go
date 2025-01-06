@@ -19,17 +19,16 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var allArgs []string
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Args...)
-	// allArgs = append(allArgs, "--temporary-dir", config.AppConfig.YTArchive.WorkingDirectory)
 	allArgs = append(allArgs, "--start-delay", config.AppConfig.YTArchive.DelayStart)
 	allArgs = append(allArgs, url)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Quality)
 
 	if runtime.GOOS == "windows" {
-		cmdArgs := append([]string{"/C", "ytarchive"}, allArgs...)
+		cmdArgs := append([]string{"/C", config.AppConfig.YTArchive.ExecutablePath}, allArgs...)
 		cmd = exec.Command("cmd", cmdArgs...)
 		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
 	} else {
-		cmd = exec.Command("ytarchive", allArgs...)
+		cmd = exec.Command(config.AppConfig.YTArchive.ExecutablePath, allArgs...)
 		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
 	}
 
@@ -72,6 +71,7 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 }
 
 func parseOutput(output string, videoId string) {
+	golog.Debug("[ytarchive] Parsing output: ", output)
 	common.DownloadJobsLock.Lock()
 	defer common.DownloadJobsLock.Unlock()
 	if strings.Contains(output, "Video Fragments") {
