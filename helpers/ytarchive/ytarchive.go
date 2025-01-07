@@ -97,6 +97,12 @@ func parseOutput(output string, videoId string) {
 		common.DownloadJobs[videoId].Status = "Muxing"
 	} else if strings.Contains(output, "Livestream has been processed") {
 		common.DownloadJobs[videoId].Status = "Processed"
+	} else if strings.Contains(output, "Final audio") {
+		filePath := strings.Split(output, "Final audio file: ")[1]
+		filename := path.Base(filePath)
+		if err := common.MoveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
+			golog.Warn("[ytarchive] Failed to move audio file: ", err)
+		}
 	} else if strings.Contains(output, "Final file") {
 		common.DownloadJobs[videoId].Status = "Finished"
 		common.DownloadJobs[videoId].Output = output
