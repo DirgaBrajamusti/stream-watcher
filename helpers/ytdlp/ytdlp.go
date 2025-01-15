@@ -18,18 +18,19 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var allArgs []string
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, config.AppConfig.YT_DLP.Args...)
-	allArgs = append(allArgs, "--exec", "echo Final File: {}")
+	allArgs = append(allArgs, "--print", `after_move:"Final File: %(filepath)s"`)
+	allArgs = append(allArgs, "--no-quiet")
 	allArgs = append(allArgs, url)
 
 	if runtime.GOOS == "windows" {
-		golog.Debug("[yt-dlp] spawning jobs in windows")
 		cmdArgs := append([]string{"/C", config.AppConfig.YT_DLP.ExecutablePath}, allArgs...)
 		cmd = exec.Command("cmd", cmdArgs...)
 		cmd.Dir = config.AppConfig.YT_DLP.WorkingDirectory
+		golog.Debug("[yt-dlp] spawning jobs in windows: ", strings.Join(allArgs, " "))
 	} else {
-		golog.Debug("[yt-dlp] spawning jobs")
 		cmd = exec.Command(config.AppConfig.YT_DLP.ExecutablePath, allArgs...)
 		cmd.Dir = config.AppConfig.YT_DLP.WorkingDirectory
+		golog.Debug("[yt-dlp] spawning jobs: ", strings.Join(allArgs, " "))
 	}
 
 	stdout, err := cmd.StdoutPipe()
