@@ -66,16 +66,48 @@ func ReadStderr(stderr io.Reader, outputBuffer []byte, parseOutput func(string, 
 func MoveFile(sourcePath, destPath string) error {
 	// Create the destination directory if it does not exist
 	destDir := filepath.Dir(destPath)
-	err := os.MkdirAll(destDir, os.ModePerm)
-	if err != nil {
+	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
 		return fmt.Errorf("[system] failed to create destination directory: %w", err)
 	}
 
-	// Rename the source file to the destination path
-	golog.Debug("[system] Renaming file from ", sourcePath, " to ", destPath)
-	err = os.Rename(sourcePath, destPath)
+	// Check if the source file exists
+	if _, err := os.Stat(sourcePath); os.IsNotExist(err) {
+		return fmt.Errorf("[system] source file does not exist: %w", err)
+	}
+
+	// // Try rename first (fast path)
+	// err := os.Rename(sourcePath, destPath)
+	// if err == nil {
+	// 	return nil
+	// }
+
+	// If rename fails, fallback to copy + delete
+	golog.Debug("[system] Rename failed, falling back to copy+delete for: ", sourcePath)
+
+	// Copy file
+	source, err := os.Open(sourcePath)
 	if err != nil {
-		return fmt.Errorf("[system] failed to rename file: %w", err)
+		return fmt.Errorf("[system] failed to open source file: %w", err)
+	}
+	defer source.Close()
+
+	dest, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("[system] failed to create destination file: %w", err)
+	}
+	defer dest.Close()
+
+	if _, err := io.Copy(dest, source); err != nil {
+		return fmt.Errorf("[system] failed to copy file: %w", err)
+	}
+
+	// Close files before removing source
+	source.Close()
+	dest.Close()
+
+	// Remove source file
+	if err := os.Remove(sourcePath); err != nil {
+		return fmt.Errorf("[system] failed to remove source file after copy: %w", err)
 	}
 
 	return nil
