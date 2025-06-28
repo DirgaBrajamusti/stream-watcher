@@ -123,6 +123,13 @@ func GetChannelLive(channelID string) (*common.ChannelLive, error) {
 		if reLive.MatchString(fragment) {
 			reVideoID := regexp.MustCompile(`"videoId":"([^"]+)`)
 			videoID := reVideoID.FindStringSubmatch(fragment)
+			reMembersOnly := regexp.MustCompile(`"[a-zA-Z]+":"Members only"`)
+			isMembersOnly := false
+			if reMembersOnly.MatchString(fragment) {
+				golog.Debug("[youtube] channel is live but members only: ", channelID)
+				isMembersOnly = true
+
+			}
 			if len(videoID) < 2 {
 				return nil, fmt.Errorf("no video id found")
 			}
@@ -153,6 +160,7 @@ func GetChannelLive(channelID string) (*common.ChannelLive, error) {
 				ChannelName:    channelName[1],
 				ChannelPicture: channelPic[1],
 				DateCrawled:    dateCrawled,
+				MembersOnly:    isMembersOnly,
 			}, nil
 		}
 	}
@@ -255,7 +263,7 @@ func CheckLiveAllChannel() {
 				golog.Debug("[youtube] live is in download jobs: ", channel.Name)
 			} else {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
-				if videoInRegex {
+				if videoInRegex || channelLive.MembersOnly && channel.AlwaysDownloadMember {
 					golog.Info("[youtube] live is in regex: ", channel.Name)
 					discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
 					go func() {

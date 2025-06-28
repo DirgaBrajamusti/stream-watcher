@@ -10,6 +10,7 @@ type ChannelLive struct {
 	ChannelName    string
 	ChannelPicture string
 	DateCrawled    string
+	MembersOnly    bool
 }
 
 type DownloadJob struct {

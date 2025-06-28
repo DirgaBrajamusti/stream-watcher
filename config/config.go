@@ -36,10 +36,11 @@ type DiscordConfig struct {
 }
 
 type YouTubeChannel struct {
-	ID      string   `mapstructure:"id"`
-	Name    string   `mapstructure:"name"`
-	Filters []string `mapstructure:"filters"`
-	OutPath string   `mapstructure:"out_path"`
+	ID                   string   `mapstructure:"id"`
+	Name                 string   `mapstructure:"name"`
+	Filters              []string `mapstructure:"filters"`
+	OutPath              string   `mapstructure:"out_path"`
+	AlwaysDownloadMember bool     `mapstructure:"always_download_member"`
 }
 
 type TwitchChannel struct {
