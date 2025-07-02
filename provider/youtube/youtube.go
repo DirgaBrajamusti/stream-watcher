@@ -254,16 +254,9 @@ func CheckLiveAllChannel() {
 	IsCheckingInProgress = true
 	for i, channel := range config.AppConfig.YouTubeChannel {
 		golog.Info("[youtube] checking live: ", channel.Name)
-		channelLive := &common.ChannelLive{}
-		var err error
-		if channel.UseHolodex {
-			golog.Debug("[youtube] using Holodex for channel: ", channel.Name)
-
-		} else {
-			channelLive, err = GetChannelLive(channel.ID)
-			if err != nil {
-				golog.Error(err)
-			}
+		channelLive, err := GetChannelLive(channel.ID)
+		if err != nil {
+			golog.Error(err)
 		}
 
 		if channelLive != nil {
