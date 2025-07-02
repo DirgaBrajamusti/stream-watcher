@@ -254,17 +254,25 @@ func CheckLiveAllChannel() {
 	IsCheckingInProgress = true
 	for i, channel := range config.AppConfig.YouTubeChannel {
 		golog.Info("[youtube] checking live: ", channel.Name)
-		channelLive, err := GetChannelLive(channel.ID)
-		if err != nil {
-			golog.Error(err)
+		channelLive := &common.ChannelLive{}
+		var err error
+		if channel.UseHolodex {
+			golog.Debug("[youtube] using Holodex for channel: ", channel.Name)
+
+		} else {
+			channelLive, err = GetChannelLive(channel.ID)
+			if err != nil {
+				golog.Error(err)
+			}
 		}
+
 		if channelLive != nil {
 			if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
 				golog.Debug("[youtube] live is in download jobs: ", channel.Name)
 			} else {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
-				if videoInRegex || channelLive.MembersOnly && channel.AlwaysDownloadMember {
-					golog.Info("[youtube] live is in regex: ", channel.Name)
+				if videoInRegex || (channelLive.MembersOnly && channel.AlwaysDownloadMember) {
+					golog.Info("[youtube] live in: ", channel.Name, " - is memberonly", channelLive.MembersOnly, " - video in regex: ", videoInRegex, " - always download member: ", channel.AlwaysDownloadMember)
 					discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
 					go func() {
 						ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
