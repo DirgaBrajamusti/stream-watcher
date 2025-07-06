@@ -23,11 +23,18 @@ type YTArchive struct {
 	OutPath          string   `mapstructure:"out_path"`
 }
 
+type StreamlinkConfig struct {
+	ExecutablePath   string   `mapstructure:"executable_path"`
+	WorkingDirectory string   `mapstructure:"working_directory"`
+	Args             []string `mapstructure:"args"`
+}
+
 type ArchiveConfig struct {
-	Cookies string `mapstructure:"cookies"`
-	Checker int    `mapstructure:"checker"`
-	Twitch  bool   `mapstructure:"twitch"`
-	YouTube bool   `mapstructure:"youtube"`
+	Cookies               string `mapstructure:"cookies"`
+	Checker               int    `mapstructure:"checker"`
+	Twitch                bool   `mapstructure:"twitch"`
+	YouTube               bool   `mapstructure:"youtube"`
+	TwitchUsingStreamlink bool   `mapstructure:"twitch_using_streamlink"`
 }
 
 type DiscordConfig struct {
@@ -58,6 +65,7 @@ type WebserverConfig struct {
 type Config struct {
 	YT_DLP         YTDLPConfig      `mapstructure:"yt-dlp"`
 	YTArchive      YTArchive        `mapstructure:"ytarchive"`
+	Streamlink     StreamlinkConfig `mapstructure:"streamlink"`
 	Archive        ArchiveConfig    `mapstructure:"archive"`
 	Discord        DiscordConfig    `mapstructure:"discord"`
 	YouTubeChannel []YouTubeChannel `mapstructure:"youtube_channel"` // Keep as slice

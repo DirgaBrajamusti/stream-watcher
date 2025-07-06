@@ -65,6 +65,7 @@ func ReadStderr(stderr io.Reader, outputBuffer []byte, parseOutput func(string, 
 
 func MoveFile(sourcePath, destPath string) error {
 	// Create the destination directory if it does not exist
+	golog.Debug("[system] Moving file from ", sourcePath, " to ", destPath)
 	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, os.ModePerm); err != nil {
 		return fmt.Errorf("[system] failed to create destination directory: %w", err)
@@ -109,6 +110,7 @@ func MoveFile(sourcePath, destPath string) error {
 	if err := os.Remove(sourcePath); err != nil {
 		return fmt.Errorf("[system] failed to remove source file after copy: %w", err)
 	}
+	golog.Debug("[system] File moved successfully from ", sourcePath, " to ", destPath)
 
 	return nil
 }

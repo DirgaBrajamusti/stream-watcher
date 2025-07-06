@@ -8,6 +8,7 @@ import (
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
+	"streamwatcher/helpers/streamlink"
 	"streamwatcher/helpers/ytdlp"
 	"time"
 
@@ -92,7 +93,7 @@ func GetChannelInfo(username string) (*common.ChannelLive, error) {
 
 func CheckLiveAllChannel() {
 	for i, channel := range config.AppConfig.TwitchChannel {
-		if common.IsChannelIDInDownloadJobs(channel.Name) {
+		if common.IsChannelIDInDownloadJobsAndFinished(channel.Name) {
 			golog.Debug("[twitch] ", channel.Name, " is already in download jobs")
 			break
 		}
@@ -102,7 +103,7 @@ func CheckLiveAllChannel() {
 			golog.Error(err)
 		}
 		if channelLive != nil {
-			if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
+			if common.IsChannelIDInDownloadJobsAndFinished(channelLive.ChannelName) {
 				golog.Debug("[twitch] ", channel.Name, " is already in download jobs")
 			} else {
 				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
@@ -110,7 +111,12 @@ func CheckLiveAllChannel() {
 					golog.Info("[twitch] ", channel.Name, " is live: ", channelLive.Title)
 					discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://twitch.tv"+channel.Name, channelLive.ThumbnailUrl, "Recording")
 					go func() {
-						ytdlp.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
+						if config.AppConfig.Archive.TwitchUsingStreamlink {
+							streamlink.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
+						} else {
+							ytdlp.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
+						}
+						// streamlink.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
 					}()
 				} else {
 					golog.Debug("[twitch] ", channel.Name, " is live but not in filter")

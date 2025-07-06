@@ -20,7 +20,7 @@ RUN go build -o super-bad-stream-watcher ./cmd
 
 FROM alpine as runner
 WORKDIR /app
-RUN apk update && apk add --no-cache ffmpeg curl bash
+RUN apk update && apk add --no-cache ffmpeg curl bash streamlink
 RUN curl https://i.jpillora.com/yt-dlp/yt-dlp! | bash
 COPY --from=ytarchive-builder /src/ytarchive/ytarchive /usr/local/bin/ytarchive
 COPY --from=build /app/super-bad-stream-watcher /app

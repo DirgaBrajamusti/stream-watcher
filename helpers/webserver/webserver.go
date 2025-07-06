@@ -24,7 +24,7 @@ import (
 	"github.com/kataras/golog"
 )
 
-//go:embed frontend/dist/*
+// go:embed frontend/dist/*
 var staticFiles embed.FS
 
 // spaFileSystem is a custom file system wrapper for SPA

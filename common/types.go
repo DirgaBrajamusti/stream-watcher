@@ -50,6 +50,18 @@ func IsChannelIDInDownloadJobs(channelID string) bool {
 	return false
 }
 
+func IsChannelIDInDownloadJobsAndFinished(channelID string) bool {
+	DownloadJobsLock.Lock()
+	defer DownloadJobsLock.Unlock()
+
+	for _, job := range DownloadJobs {
+		if job.ChannelLive.ChannelID == channelID && job.Status != "Finished" {
+			return true
+		}
+	}
+	return false
+}
+
 func AddDownloadJob(videoID string, channelLive ChannelLive, status string, output string, outPath string) {
 	DownloadJobsLock.Lock()
 	defer DownloadJobsLock.Unlock()
