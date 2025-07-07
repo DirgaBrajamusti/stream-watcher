@@ -28,7 +28,11 @@ func archivers() {
 	if config.AppConfig.Archive.Twitch {
 		go func() {
 			golog.Debug("[System] Checking for live Twitch Channels")
-			twitch.CheckLiveAllChannel()
+			if twitch.IsCheckingInProgress {
+				golog.Debug("[System] Twitch Checker is in progress, skipping this check")
+			} else {
+				twitch.CheckLiveAllChannel()
+			}
 		}()
 	}
 }

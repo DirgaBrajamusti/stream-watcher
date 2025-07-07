@@ -15,6 +15,8 @@ import (
 	"github.com/kataras/golog"
 )
 
+var IsCheckingInProgress bool
+
 type StreamInfo struct {
 	ID              string `json:"id"`
 	Title           string `json:"title"`
@@ -92,6 +94,10 @@ func GetChannelInfo(username string) (*common.ChannelLive, error) {
 }
 
 func CheckLiveAllChannel() {
+	if IsCheckingInProgress {
+		return
+	}
+	IsCheckingInProgress = true
 	for i, channel := range config.AppConfig.TwitchChannel {
 		if common.IsChannelIDInDownloadJobsAndFinished(channel.Name) {
 			golog.Debug("[twitch] ", channel.Name, " is already in download jobs")
@@ -130,4 +136,5 @@ func CheckLiveAllChannel() {
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
 	}
+	IsCheckingInProgress = false
 }
