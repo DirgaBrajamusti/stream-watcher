@@ -46,4 +46,4 @@ name = "ChannelName"
 filters = [""]
 out_path = "./downloads/ChannelName"
 always_download_member=false
-UseMemberCookies=false
+use_member_cookies=false
