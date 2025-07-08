@@ -35,6 +35,12 @@ func IsVideoIDInDownloadJobs(videoID string) bool {
 	defer DownloadJobsLock.Unlock()
 
 	_, exists := DownloadJobs[videoID]
+	if exists && DownloadJobs[videoID].Status != "Error" {
+		return true
+	} else if exists && DownloadJobs[videoID].Status == "Error" {
+		return false
+	}
+
 	return exists
 }
 

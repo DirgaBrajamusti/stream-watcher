@@ -116,7 +116,6 @@ func CheckLiveAllChannel() {
 						} else {
 							ytdlp.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
 						}
-						// streamlink.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
 					}()
 				} else {
 					golog.Debug("[twitch] ", channel.Name, " is live but not in filter")
