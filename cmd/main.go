@@ -31,7 +31,7 @@ func safeTwitchCheck() {
 
 func safeYouTubeCheck() {
 	if !youtubeMutex.TryLock() {
-		golog.Debug("[System] YouTube checker is already running"))
+		golog.Debug("[System] YouTube checker is already running")
 		return
 	}
 	defer youtubeMutex.Unlock()
