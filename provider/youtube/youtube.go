@@ -19,9 +19,6 @@ import (
 	"github.com/kataras/golog"
 )
 
-// IsCheckingInProgress is a flag to check if the checker is in progress
-var IsCheckingInProgress bool
-
 // NetscapeCookie represents a cookie in Netscape format
 type NetscapeCookie struct {
 	Domain     string
@@ -76,7 +73,7 @@ func ParseNetscapeCookieFile(filepath string) ([]*http.Cookie, error) {
 	return cookies, nil
 }
 
-func GetChannelLive(channelID string) (*common.ChannelLive, error) {
+func GetChannelLive(channelID string, useMemberCookies bool) (*common.ChannelLive, error) {
 	// Create a cookie jar
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -86,7 +83,11 @@ func GetChannelLive(channelID string) (*common.ChannelLive, error) {
 	// Parse and set cookies if file path is provided
 	var cookieFilePath string
 	if config.AppConfig.Archive.Cookies != "" {
-		cookieFilePath = config.AppConfig.Archive.Cookies
+		if useMemberCookies {
+			cookieFilePath = config.AppConfig.Archive.MemberCookies
+		} else {
+			cookieFilePath = config.AppConfig.Archive.Cookies
+		}
 	} else {
 		cookieFilePath = ""
 	}
@@ -248,13 +249,9 @@ func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
 }
 
 func CheckLiveAllChannel() {
-	if IsCheckingInProgress {
-		return
-	}
-	IsCheckingInProgress = true
 	for i, channel := range config.AppConfig.YouTubeChannel {
 		golog.Info("[youtube] checking live: ", channel.Name)
-		channelLive, err := GetChannelLive(channel.ID)
+		channelLive, err := GetChannelLive(channel.ID, channel.UseMemberCookies)
 		if err != nil {
 			golog.Error(err)
 		}
@@ -282,7 +279,6 @@ func CheckLiveAllChannel() {
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
 	}
-	IsCheckingInProgress = false
 }
 
 func ParseVideoID(parsedURI *url.URL) *string {

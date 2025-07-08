@@ -17,6 +17,7 @@ delay_start = "1s"
 
 [archive]
 cookies = "./cookies.txt" //used for youtube
+member_cookies = "./cookies.txt"
 checker = 1
 twitch = true
 youtube = true
@@ -44,3 +45,5 @@ id = "YourChannelID"
 name = "ChannelName"
 filters = [""]
 out_path = "./downloads/ChannelName"
+always_download_member=false
+UseMemberCookies=false

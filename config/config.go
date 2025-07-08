@@ -31,6 +31,7 @@ type StreamlinkConfig struct {
 
 type ArchiveConfig struct {
 	Cookies               string `mapstructure:"cookies"`
+	MemberCookies         string `mapstructure:"member_cookies"`
 	Checker               int    `mapstructure:"checker"`
 	Twitch                bool   `mapstructure:"twitch"`
 	YouTube               bool   `mapstructure:"youtube"`
@@ -47,7 +48,8 @@ type YouTubeChannel struct {
 	Name                 string   `mapstructure:"name"`
 	Filters              []string `mapstructure:"filters"`
 	OutPath              string   `mapstructure:"out_path"`
-	AlwaysDownloadMember bool     `mapstructure:"always_download_member"`
+	AlwaysDownloadMember bool     `mapstructure:"always_download_member" default:"false"`
+	UseMemberCookies     bool     `mapstructure:"use_member_cookies" default:"false"`
 }
 
 type TwitchChannel struct {

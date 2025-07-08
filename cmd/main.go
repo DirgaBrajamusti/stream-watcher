@@ -6,6 +6,7 @@ import (
 	"streamwatcher/helpers/webserver"
 	"streamwatcher/provider/twitch"
 	"streamwatcher/provider/youtube"
+	"sync"
 	"time"
 
 	"streamwatcher/config"
@@ -13,27 +14,38 @@ import (
 	"github.com/kataras/golog"
 )
 
+var (
+	twitchMutex  sync.Mutex
+	youtubeMutex sync.Mutex
+)
+
+func safeTwitchCheck() {
+	if !twitchMutex.TryLock() {
+		golog.Debug("[System] Twitch checker is already running")
+		return
+	}
+	defer twitchMutex.Unlock()
+	golog.Debug("[System] Running Twitch check")
+	twitch.CheckLiveAllChannel()
+}
+
+func safeYouTubeCheck() {
+	if !youtubeMutex.TryLock() {
+		golog.Debug("[System] YouTube checker is already running"))
+		return
+	}
+	defer youtubeMutex.Unlock()
+	golog.Debug("[System] Running YouTube check")
+	youtube.CheckLiveAllChannel()
+}
+
 func archivers() {
-	golog.Debug("[System] Checking for live channels")
+	golog.Debug("[System] Scheduled check for live channels")
 	if config.AppConfig.Archive.YouTube {
-		go func() {
-			golog.Debug("[System] Checking for live Youtube Channels")
-			if youtube.IsCheckingInProgress {
-				golog.Debug("[System] Youtube Checker is in progress, skipping this check")
-			} else {
-				youtube.CheckLiveAllChannel()
-			}
-		}()
+		safeYouTubeCheck()
 	}
 	if config.AppConfig.Archive.Twitch {
-		go func() {
-			golog.Debug("[System] Checking for live Twitch Channels")
-			if twitch.IsCheckingInProgress {
-				golog.Debug("[System] Twitch Checker is in progress, skipping this check")
-			} else {
-				twitch.CheckLiveAllChannel()
-			}
-		}()
+		safeTwitchCheck()
 	}
 }
 
@@ -54,25 +66,18 @@ func main() {
 	config.LoadConfig()
 	go webserver.StartServer()
 	debug := flag.Bool("debug", false, "enable debug mode")
-
-	// Parse flags
 	flag.Parse()
-
-	// Use the debug flag
 	if *debug {
 		golog.SetLevel("debug")
 	}
-
 	golog.Infof("[System] Starting...")
 	initialized()
-	archivers()
+
+	archivers() // Initial check at startup
 
 	ticker := time.NewTicker(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			archivers()
-		}
+	for range ticker.C {
+		archivers()
 	}
 }
