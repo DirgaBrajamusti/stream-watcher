@@ -1,7 +1,7 @@
 FROM node:16 as web
 WORKDIR /helpers/webserver/frontend
 COPY /helpers/webserver/frontend .
-RUN yarn install --frozen-lockfile
+RUN yarn install
 RUN yarn build
 
 FROM golang:1.20-alpine AS ytarchive-builder

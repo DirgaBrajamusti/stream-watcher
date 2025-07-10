@@ -256,29 +256,42 @@ func CheckLiveAllChannel() {
 			golog.Error(err)
 		}
 
-		if channelLive != nil {
-			if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
-				golog.Debug("[youtube] live is in download jobs: ", channel.Name)
-			} else {
-				videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
-				if videoInRegex || (channelLive.MembersOnly && channel.AlwaysDownloadMember) {
-					golog.Info("[youtube] live in: ", channel.Name, " - is memberonly", channelLive.MembersOnly, " - video in regex: ", videoInRegex, " - always download member: ", channel.AlwaysDownloadMember)
-					discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
-					go func() {
-						ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
-					}()
-				} else {
-					golog.Debug("[youtube] live is not in regex: ", channel.Name)
-				}
-			}
-		} else {
-			golog.Debug("[youtube] channel is not live: ", channel.Name)
+		if checkingLiveCondition(channelLive, &channel) {
+			discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
+			go func() {
+				ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
+			}()
 		}
 		if i < len(config.AppConfig.YouTubeChannel)-1 {
 			golog.Debug("[youtube] sleeping before checking next channel for ", config.AppConfig.Archive.Checker, "minutes")
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
 	}
+}
+
+func checkingLiveCondition(channelLive *common.ChannelLive, channel *config.YouTubeChannel) bool {
+	if channelLive == nil {
+		return false
+	}
+
+	if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
+		golog.Debug("[youtube] live is in download jobs: ", channel.Name)
+		return false
+	}
+
+	if channelLive.MembersOnly && !channel.UseMemberCookies {
+		golog.Debug("[youtube] live is members only, but not using member cookies: ", channel.Name)
+		return false
+	}
+
+	videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
+	if videoInRegex || (channelLive.MembersOnly && channel.AlwaysDownloadMember) {
+		golog.Info("[youtube] live in: ", channel.Name, " - is memberonly", channelLive.MembersOnly, " - video in regex: ", videoInRegex, " - always download member: ", channel.AlwaysDownloadMember)
+		return true
+	}
+
+	golog.Debug("[youtube] live is not in regex: ", channel.Name)
+	return false
 }
 
 func ParseVideoID(parsedURI *url.URL) *string {
