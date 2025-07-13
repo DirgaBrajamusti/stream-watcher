@@ -111,11 +111,7 @@ func CheckLiveAllChannel() {
 					golog.Info("[twitch] ", channel.Name, " is live: ", channelLive.Title)
 					discord.SendNotificationWebhook(channel.Name, channelLive.Title, "https://twitch.tv"+channel.Name, channelLive.ThumbnailUrl, "Recording")
 					go func() {
-						if config.AppConfig.Archive.TwitchUsingStreamlink {
-							streamlink.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
-						} else {
-							ytdlp.StartDownload("https://twitch.tv/"+channel.Name, []string{}, channelLive, channel.OutPath)
-						}
+						TwitchStartDownload(channel.Name, channelLive, channel.OutPath)
 					}()
 				} else {
 					golog.Debug("[twitch] ", channel.Name, " is live but not in filter")
@@ -128,5 +124,15 @@ func CheckLiveAllChannel() {
 			golog.Debug("[twitch] Waiting ", config.AppConfig.Archive.Checker, " minutes before checking next channel")
 			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
 		}
+	}
+}
+
+func TwitchStartDownload(videoID string, channelLive *common.ChannelLive, outPath string) {
+	golog.Info("[twitch] Added task for channel: ", channelLive.ChannelName)
+
+	if config.AppConfig.Archive.TwitchUsingStreamlink {
+		streamlink.StartDownload("https://twitch.tv/"+channelLive.ChannelName, []string{}, channelLive, outPath)
+	} else {
+		ytdlp.StartDownload("https://twitch.tv/"+channelLive.ChannelName, []string{}, channelLive, outPath)
 	}
 }

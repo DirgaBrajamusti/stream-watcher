@@ -14,7 +14,6 @@ import (
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/ytarchive"
-	"streamwatcher/helpers/ytdlp"
 	"streamwatcher/provider/twitch"
 	"streamwatcher/provider/youtube"
 	"strings"
@@ -98,8 +97,7 @@ func addTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		go func() {
-			golog.Info("[webserver] Added task for twitch: ", twitchUsername)
-			ytdlp.StartDownload("https://twitch.tv/"+twitchUsername, []string{}, channelLive, task.OutPath)
+			twitch.TwitchStartDownload(twitchUsername, channelLive, task.OutPath)
 		}()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
