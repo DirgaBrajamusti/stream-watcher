@@ -17,7 +17,6 @@ const (
 	moduleName string = "[streamlink] "
 )
 
-var downloadOutputPath string
 var waitOutputPath bool
 
 func StartDownload(url string, args []string, channelLive *common.ChannelLive, outPath string) {
@@ -73,8 +72,8 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 		golog.Warn(moduleName, "Error waiting for command to finish: ", err)
 	}
 
-	filename := filepath.Base(downloadOutputPath)
-	if err := common.MoveFile(downloadOutputPath, common.DownloadJobs[channelLive.VideoID].OutPath+"/"+filename); err != nil {
+	filename := filepath.Base(common.DownloadJobs[channelLive.VideoID].FinalFile)
+	if err := common.MoveFile(common.DownloadJobs[channelLive.VideoID].FinalFile, common.DownloadJobs[channelLive.VideoID].OutPath+"/"+filename); err != nil {
 		golog.Warn(moduleName, "Failed to move file: ", err)
 	}
 	common.DownloadJobs[channelLive.VideoID].FinalFile = common.DownloadJobs[channelLive.VideoID].OutPath + "/" + filename
@@ -90,8 +89,8 @@ func parseOutput(output string, videoId string) {
 	common.DownloadJobs[videoId].Output = output
 
 	if waitOutputPath {
-		downloadOutputPath = output
-		golog.Info(moduleName, "output path: ", downloadOutputPath)
+		common.DownloadJobs[videoId].FinalFile = output
+		golog.Info(moduleName, "output path: ", output)
 		common.DownloadJobs[videoId].Status = "Downloading"
 		golog.Info(moduleName, "Downloading: ", output)
 		waitOutputPath = false
