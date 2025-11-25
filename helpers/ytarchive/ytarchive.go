@@ -19,7 +19,6 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var allArgs []string
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Args...)
-	allArgs = append(allArgs, "--start-delay", config.AppConfig.YTArchive.DelayStart)
 	allArgs = append(allArgs, url)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Quality)
 
