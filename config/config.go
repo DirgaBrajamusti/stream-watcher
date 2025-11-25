@@ -2,7 +2,9 @@
 package config
 
 import (
-	"github.com/fsnotify/fsnotify"
+	"os"
+	"time"
+
 	"github.com/kataras/golog"
 	"github.com/spf13/viper"
 )
@@ -76,6 +78,7 @@ type Config struct {
 }
 
 var AppConfig Config
+var lastModTime time.Time
 
 // LoadConfig reads the config file and populates AppConfig
 func LoadConfig() {
@@ -92,11 +95,32 @@ func LoadConfig() {
 		golog.Fatal("Unable to decode into struct, ", err)
 	}
 
-	viper.OnConfigChange(func(e fsnotify.Event) {
-		golog.Info("Config file changed")
-		if err := viper.Unmarshal(&AppConfig); err != nil {
-			golog.Error("Error reloading config:", err)
+	// Get initial mod time
+	if stat, err := os.Stat("config.toml"); err == nil {
+		lastModTime = stat.ModTime()
+	}
+
+	// Start polling for config changes
+	go pollConfigChanges()
+}
+
+// pollConfigChanges polls the config file for changes every 5 seconds
+func pollConfigChanges() {
+	for {
+		time.Sleep(5 * time.Second)
+		if stat, err := os.Stat("config.toml"); err == nil {
+			if stat.ModTime().After(lastModTime) {
+				golog.Info("Config file changed")
+				if err := viper.ReadInConfig(); err != nil {
+					golog.Error("Error reading config file:", err)
+					continue
+				}
+				if err := viper.Unmarshal(&AppConfig); err != nil {
+					golog.Error("Error reloading config:", err)
+				} else {
+					lastModTime = stat.ModTime()
+				}
+			}
 		}
-	})
-	viper.WatchConfig()
+	}
 }
