@@ -15,12 +15,16 @@ type YTDLPConfig struct {
 }
 
 type YTArchive struct {
-	ExecutablePath   string   `mapstructure:"executable_path"`
-	WorkingDirectory string   `mapstructure:"working_directory"`
-	Args             []string `mapstructure:"args"`
-	Quality          string   `mapstructure:"quality"`
-	DelayStart       string   `mapstructure:"delay_start"`
-	OutPath          string   `mapstructure:"out_path"`
+	ExecutablePath       string   `mapstructure:"executable_path"`
+	WorkingDirectory     string   `mapstructure:"working_directory"`
+	Args                 []string `mapstructure:"args"`
+	Quality              string   `mapstructure:"quality"`
+	DelayStart           string   `mapstructure:"delay_start"`
+	MembershipCookies    string   `mapstructure:"membership_cookies"`
+	MemberCookiesPOToken string   `mapstructure:"member_cookies_po_token"`
+	Cookies              string   `mapstructure:"cookies"`
+	CookiesPOToken       string   `mapstructure:"cookies_po_token"`
+	OutPath              string   `mapstructure:"out_path"`
 }
 
 type StreamlinkConfig struct {

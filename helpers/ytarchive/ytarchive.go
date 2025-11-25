@@ -19,6 +19,13 @@ func StartDownload(url string, args []string, channelLive *common.ChannelLive, o
 	var allArgs []string
 	allArgs = append(allArgs, args...)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Args...)
+	if channelLive.MembersOnly && config.AppConfig.YTArchive.MembershipCookies != "" {
+		allArgs = append(allArgs, "--cookies", config.AppConfig.YTArchive.MembershipCookies)
+		allArgs = append(allArgs, "--potoken", config.AppConfig.YTArchive.MemberCookiesPOToken)
+	} else {
+		allArgs = append(allArgs, "--cookies", config.AppConfig.YTArchive.Cookies)
+		allArgs = append(allArgs, "--potoken", config.AppConfig.YTArchive.CookiesPOToken)
+	}
 	allArgs = append(allArgs, "--start-delay", config.AppConfig.YTArchive.DelayStart)
 	allArgs = append(allArgs, url)
 	allArgs = append(allArgs, config.AppConfig.YTArchive.Quality)
