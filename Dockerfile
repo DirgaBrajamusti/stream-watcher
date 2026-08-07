@@ -16,12 +16,12 @@ FROM golang:1.22-alpine AS build
 WORKDIR /app
 COPY . .
 COPY --from=web /helpers/webserver/frontend/dist /app/helpers/webserver/frontend/dist
-RUN go build -o stream-watcher ./cmd
+RUN go build -o super-bad-stream-watcher ./cmd
 
 FROM alpine AS runner
 WORKDIR /app
 RUN apk add --no-cache ffmpeg curl bash streamlink python3 py3-pip
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
 COPY --from=ytarchive-builder /src/ytarchive/ytarchive /usr/local/bin/ytarchive
-COPY --from=build /app/stream-watcher /app/
-CMD ["/app/stream-watcher"]
+COPY --from=build /app/super-bad-stream-watcher /app/
+CMD ["/app/super-bad-stream-watcher"]
