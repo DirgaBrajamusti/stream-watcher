@@ -1,120 +1,158 @@
 package ytarchive
 
 import (
-	"os/exec"
-	"path"
+	"context"
+	"fmt"
+	"log/slog"
+	"path/filepath"
 	"regexp"
-	"runtime"
+	"strings"
+	"time"
+
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
-	"strings"
-	"sync"
-
-	"github.com/kataras/golog"
 )
 
-func StartDownload(url string, args []string, channelLive *common.ChannelLive, outPath string) {
-	var cmd *exec.Cmd
-	var allArgs []string
-	allArgs = append(allArgs, args...)
-	allArgs = append(allArgs, config.AppConfig.YTArchive.Args...)
+var (
+	videoTitleRe = regexp.MustCompile(`Video Title:\s*(.*?)\s*$`)
+)
+
+// StartDownload begins a ytarchive download for the given YouTube URL.
+func StartDownload(ctx context.Context, url string, args []string, channelLive *common.ChannelLive, outPath string) {
+	cfg := config.Get().YTArchive
+
+	job := common.NewDownloadJob(channelLive.VideoID, *channelLive, common.StatusWaiting, outPath)
+	job.Provider = "ytarchive"
+	if _, ok := common.DefaultStore.Add(job); !ok {
+		slog.Info("ytarchive: job already exists", "video_id", channelLive.VideoID)
+		return
+	}
+
+	allArgs := append([]string(nil), args...)
+	allArgs = append(allArgs, cfg.Args...)
 	allArgs = append(allArgs, url)
-	allArgs = append(allArgs, config.AppConfig.YTArchive.Quality)
+	if cfg.Quality != "" {
+		allArgs = append(allArgs, cfg.Quality)
+	}
 
-	if runtime.GOOS == "windows" {
-		cmdArgs := append([]string{"/C", config.AppConfig.YTArchive.ExecutablePath}, allArgs...)
-		cmd = exec.Command("cmd", cmdArgs...)
-		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
+	if cfg.DelayStart != "" {
+		if d, err := time.ParseDuration(cfg.DelayStart); err == nil && d > 0 {
+			slog.Info("ytarchive: delaying start", "duration", d)
+			select {
+			case <-time.After(d):
+			case <-ctx.Done():
+				common.DefaultStore.SetStatus(job.VideoID, common.StatusError, "cancelled during delay")
+				return
+			}
+		}
+	}
+
+	downloadCfg := common.DownloaderConfig{
+		Executable: cfg.ExecutablePath,
+		WorkingDir: cfg.WorkingDirectory,
+		Args:       allArgs,
+	}
+
+	parser := &parser{job: job}
+	if err := common.RunExternalDownloader(ctx, downloadCfg, job, parser); err != nil {
+		slog.Error("ytarchive: download failed", "video_id", job.VideoID, "error", err)
 	} else {
-		cmd = exec.Command(config.AppConfig.YTArchive.ExecutablePath, allArgs...)
-		cmd.Dir = config.AppConfig.YTArchive.WorkingDirectory
+		slog.Info("ytarchive: download finished", "video_id", job.VideoID, "final_file", job.FinalFile)
 	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		golog.Debug("[ytarchive] Error creating StdoutPipe:", err)
-		return
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		golog.Debug("[ytarchive] Error creating StderrPipe:", err)
-		return
-	}
-
-	common.AddDownloadJob(channelLive.VideoID, *channelLive, "Idle", "", outPath)
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		golog.Warn("[ytarchive] Failed to start command: ", err)
-		return
-	}
-	outputBuffer := make([]byte, 4096)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go common.ReadStdout(stdout, outputBuffer, parseOutput, channelLive.VideoID, &wg, "ytarchive")
-
-	// Read stderr (in case progress is written to stderr)
-	go common.ReadStderr(stderr, outputBuffer, parseOutput, channelLive.VideoID, &wg, "ytarchive")
-
-	wg.Wait()
-
-	if err := cmd.Wait(); err != nil {
-		golog.Warn("[ytarchive] Error waiting for command to finish:", err)
-	}
-
-	golog.Debug("[ytarchive] Exited")
 }
 
-func parseOutput(output string, videoId string) {
-	golog.Debug("[ytarchive] Parsing output: ", output)
-	common.DownloadJobsLock.Lock()
-	defer common.DownloadJobsLock.Unlock()
-	if strings.Contains(output, "Video Fragments") {
-		common.DownloadJobs[videoId].Status = "Downloading"
-		parts := strings.Split(output, ";")
-		videoFragments := strings.TrimSpace(strings.Split(parts[0], ":")[1])
-		audioFragments := strings.TrimSpace(strings.Split(parts[1], ":")[1])
-		totalDownloaded := strings.TrimSpace(strings.Split(parts[2], ":")[1])
-		common.DownloadJobs[videoId].Output = output
-		common.DownloadJobs[videoId].VideoFragments = videoFragments
-		common.DownloadJobs[videoId].AudioFragments = audioFragments
-		common.DownloadJobs[videoId].TotalSize = totalDownloaded
-	} else if strings.Contains(output, "Video Title") {
-		re := regexp.MustCompile(`Video Title:\s*(.*?)\s*$`)
-		matches := re.FindStringSubmatch(output)
-		if len(matches) > 1 {
-			common.DownloadJobs[videoId].ChannelLive.Title = matches[1]
+type parser struct {
+	job *common.DownloadJob
+}
+
+func (p *parser) Parse(line string, update func(func(*common.DownloadJob))) {
+	slog.Debug("ytarchive: output", "line", line)
+
+	switch {
+	case strings.Contains(line, "Video Fragments"):
+		update(func(j *common.DownloadJob) {
+			parts := strings.Split(line, ";")
+			if len(parts) >= 3 {
+				j.VideoFragments = extractValue(parts[0])
+				j.AudioFragments = extractValue(parts[1])
+				j.TotalSize = extractValue(parts[2])
+			}
+			j.Status = common.StatusDownloading
+			j.Output = line
+		})
+	case strings.Contains(line, "Video Title"):
+		update(func(j *common.DownloadJob) {
+			if matches := videoTitleRe.FindStringSubmatch(line); len(matches) > 1 {
+				j.ChannelLive.Title = matches[1]
+			}
+		})
+	case strings.Contains(line, "Waiting for stream"):
+		update(func(j *common.DownloadJob) {
+			j.Status = common.StatusWaiting
+			j.Output = line
+		})
+	case strings.Contains(line, "Muxing final file"):
+		update(func(j *common.DownloadJob) {
+			j.Status = common.StatusMuxing
+		})
+	case strings.Contains(line, "Livestream has been processed"):
+		update(func(j *common.DownloadJob) {
+			j.Status = common.StatusProcessed
+		})
+	case strings.Contains(line, "Final audio"):
+		if filePath, ok := extractPath(line, "Final audio file: "); ok {
+			update(func(j *common.DownloadJob) {
+				moveDownload(filePath, j)
+			})
 		}
-	} else if strings.Contains(output, "Waiting for stream") {
-		common.DownloadJobs[videoId].Output = output
-		common.DownloadJobs[videoId].Status = "Waiting"
-	} else if strings.Contains(output, "Muxing final file") {
-		common.DownloadJobs[videoId].Status = "Muxing"
-	} else if strings.Contains(output, "Livestream has been processed") {
-		common.DownloadJobs[videoId].Status = "Processed"
-	} else if strings.Contains(output, "Final audio") {
-		filePath := strings.Split(output, "Final audio file: ")[1]
-		filename := path.Base(filePath)
-		if err := common.MoveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
-			golog.Warn("[ytarchive] Failed to move audio file: ", err)
+	case strings.Contains(line, "Final file"):
+		if filePath, ok := extractPath(line, "Final file: "); ok {
+			update(func(j *common.DownloadJob) {
+				j.Status = common.StatusFinished
+				j.Output = line
+				moveDownload(filePath, j)
+			})
 		}
-	} else if strings.Contains(output, "Final file") {
-		common.DownloadJobs[videoId].Status = "Finished"
-		common.DownloadJobs[videoId].Output = output
-		filePath := strings.Split(output, "Final file: ")[1]
-		filename := path.Base(filePath)
-		if err := common.MoveFile(filePath, common.DownloadJobs[videoId].OutPath+"/"+filename); err != nil {
-			golog.Warn("[ytarchive] Failed to move file: ", err)
-		}
-		common.DownloadJobs[videoId].FinalFile = common.DownloadJobs[videoId].OutPath + "/" + filename
-		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelName, common.DownloadJobs[videoId].ChannelLive.Title, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Done")
-	} else if strings.Contains(output, "Error retrieving player response") || strings.Contains(output, "unable to retrieve") || strings.Contains(output, "error writing the muxcmd file") || strings.Contains(output, "Something must have gone wrong with ffmpeg") || strings.Contains(output, "At least one error occurred") || strings.Contains(output, "ERROR: ") {
-		common.DownloadJobs[videoId].Status = "Error"
-		common.DownloadJobs[videoId].Output = output
-		discord.SendNotificationWebhook(common.DownloadJobs[videoId].ChannelLive.ChannelName, common.DownloadJobs[videoId].ChannelLive.Title+" Error: "+output, "https://www.youtube.com/watch?v="+common.DownloadJobs[videoId].VideoID, common.DownloadJobs[videoId].ChannelLive.ThumbnailUrl, "Error")
+		discord.SendNotification(context.Background(), p.job.ChannelLive.ChannelName, p.job.ChannelLive.Title,
+			fmt.Sprintf("https://www.youtube.com/watch?v=%s", p.job.VideoID), p.job.ChannelLive.ThumbnailURL, "Done")
+	case strings.Contains(line, "Error retrieving player response"),
+		strings.Contains(line, "unable to retrieve"),
+		strings.Contains(line, "error writing the muxcmd file"),
+		strings.Contains(line, "Something must have gone wrong with ffmpeg"),
+		strings.Contains(line, "At least one error occurred"),
+		strings.Contains(line, "ERROR: "):
+		update(func(j *common.DownloadJob) {
+			j.Status = common.StatusError
+			j.Output = line
+		})
+		discord.SendNotification(context.Background(), p.job.ChannelLive.ChannelName, line,
+			fmt.Sprintf("https://www.youtube.com/watch?v=%s", p.job.VideoID), p.job.ChannelLive.ThumbnailURL, "Error")
 	}
+}
+
+func extractValue(part string) string {
+	idx := strings.Index(part, ":")
+	if idx == -1 {
+		return strings.TrimSpace(part)
+	}
+	return strings.TrimSpace(part[idx+1:])
+}
+
+func extractPath(line, prefix string) (string, bool) {
+	idx := strings.Index(line, prefix)
+	if idx == -1 {
+		return "", false
+	}
+	return strings.TrimSpace(line[idx+len(prefix):]), true
+}
+
+func moveDownload(filePath string, job *common.DownloadJob) {
+	filename := filepath.Base(filePath)
+	dest := filepath.Join(job.OutPath, filename)
+	if err := common.MoveFile(filePath, dest); err != nil {
+		slog.Error("ytarchive: failed to move file", "error", err)
+		return
+	}
+	job.FinalFile = dest
 }

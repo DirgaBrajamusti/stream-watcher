@@ -1,23 +1,30 @@
 package webserver
 
-type JSONAddTask struct {
-	YoutubeUrl string `json:"video_url"`
-	OutPath    string `json:"output_directory"`
+// AddTaskRequest is the request body for adding a manual task.
+type AddTaskRequest struct {
+	VideoURL string `json:"video_url"`
+	OutPath  string `json:"output_directory"`
 }
 
-type Task struct {
+// TaskResponse describes the task metadata returned by the API.
+type TaskResponse struct {
 	Title           string `json:"title"`
 	VideoID         string `json:"video_id"`
+	VideoURL        string `json:"video_url"`
 	VideoPicture    string `json:"video_picture"`
 	ChannelName     string `json:"channel_name"`
 	ChannelID       string `json:"channel_id"`
+	ChannelURL      string `json:"channel_url"`
 	ChannelPicture  string `json:"channel_picture"`
 	OutputDirectory string `json:"output_directory"`
+	Platform        string `json:"platform"`
 }
 
-type Status struct {
+// StatusResponse describes the current download status.
+type StatusResponse struct {
 	Version        string `json:"version"`
 	State          string `json:"state"`
+	Provider       string `json:"provider"`
 	LastOutput     string `json:"last_output"`
 	LastUpdate     string `json:"last_update"`
 	VideoFragments any    `json:"video_fragments"`
@@ -27,13 +34,14 @@ type Status struct {
 	OutputFile     any    `json:"output_file"`
 }
 
-type Response struct {
-	Task   Task   `json:"task"`
-	Status Status `json:"status"`
+// JobResponse is the full API response for a download job.
+type JobResponse struct {
+	Task   TaskResponse   `json:"task"`
+	Status StatusResponse `json:"status"`
 }
 
-// Get Config
-type Channel struct {
+// ChannelResponse describes a watched channel.
+type ChannelResponse struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
 	Filters          []string `json:"filters"`
@@ -42,6 +50,13 @@ type Channel struct {
 	PictureURL       string   `json:"picture_url"`
 }
 
+// ConfigResponse is the response for the /api/config endpoint.
 type ConfigResponse struct {
-	Channel []Channel `json:"channel"`
+	Channel []ChannelResponse `json:"channel"`
+}
+
+// MessageResponse is a simple JSON message wrapper.
+type MessageResponse struct {
+	Message string `json:"message"`
+	Status  any    `json:"status"`
 }

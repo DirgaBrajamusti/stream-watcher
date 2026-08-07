@@ -20,64 +20,171 @@ import React from 'react';
 import { stateString, useMutateCreateTask, useQueryTasks } from '../api/tasks';
 import { TaskWithStatus } from '../bindings/TaskWithStatus';
 import { SuspenseLoader } from '../shared/SuspenseLoader';
-import { IconPlus } from '@tabler/icons';
+import { IconPlus, IconExternalLink } from '@tabler/icons';
 import { closeAllModals, openModal } from '@mantine/modals';
 import { showNotification } from '@mantine/notifications';
 import { useQueryConfig } from '../api/config';
-import { YTAState } from '../bindings/YTAState';
 
 const SleepingPanda = React.lazy(() => import('../lotties/SleepingPanda'));
 
-const TaskStateBadge = ({ state }: { state: YTAState }) => (
-  <Badge
-    color={
-      state === 'Recording'
-        ? 'green'
-        : state === 'Finished'
-        ? 'blue'
-        : state === 'Muxing'
-        ? 'yellow'
-        : state === 'Idle' || state === 'AlreadyProcessed' || state === 'Ended'
-        ? 'gray'
-        : state === 'Interrupted' || state === 'Errored'
-        ? 'red'
-        : 'violet'
-    }
-    variant="filled"
-  >
-    {stateString(state)}
-  </Badge>
-);
+const providerLabel = (provider: string) => {
+  switch (provider) {
+    case 'ytarchive':
+      return 'ytarchive';
+    case 'yt-dlp':
+      return 'yt-dlp';
+    case 'streamlink':
+      return 'streamlink';
+    default:
+      return provider || 'unknown';
+  }
+};
 
-const rowElements = ({ task, status }: TaskWithStatus) => [
-  <Image width={160} height={90} radius="md" src={task.video_picture} />,
+const providerColor = (provider: string) => {
+  switch (provider) {
+    case 'ytarchive':
+      return 'red';
+    case 'yt-dlp':
+      return 'blue';
+    case 'streamlink':
+      return 'violet';
+    case 'rplay':
+      return 'orange';
+    default:
+      return 'gray';
+  }
+};
+
+const platformColor = (platform: string) => {
+  switch (platform) {
+    case 'youtube':
+      return 'red';
+    case 'twitch':
+      return 'violet';
+    case 'rplay':
+      return 'orange';
+    default:
+      return 'gray';
+  }
+};
+
+const TaskStateBadge = ({ state }: { state: string }) => {
+  const color =
+    state === 'Recording'
+      ? 'green'
+      : state === 'Finished'
+      ? 'blue'
+      : state === 'Muxing'
+      ? 'yellow'
+      : state === 'Idle' || state === 'AlreadyProcessed' || state === 'Ended'
+      ? 'gray'
+      : state === 'Interrupted' || state === 'Error'
+      ? 'red'
+      : 'violet';
+  return (
+    <Badge color={color} variant="filled">
+      {stateString(state)}
+    </Badge>
+  );
+};
+
+const TaskTitle = ({ task }: { task: TaskWithStatus['task'] }) => (
   <>
     <Anchor
-      style={{ display: 'block' }}
-      href={'https://www.youtube.com/watch?v=' + task.video_id}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      href={task.video_url}
+      target="_blank"
+      rel="noreferrer"
     >
       {task.title}
+      <IconExternalLink size={14} />
     </Anchor>
     <Anchor
       color="dimmed"
-      style={{ display: 'block' }}
-      href={'https://www.youtube.com/channel/' + task.channel_id}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      href={task.channel_url}
+      target="_blank"
+      rel="noreferrer"
     >
       {task.channel_name}
+      <IconExternalLink size={12} />
     </Anchor>
-  </>,
-  <TaskStateBadge state={status.state} />,
-  <>
-    {status.total_size === null ? (
-      'None'
-    ) : (
-      <>
-        V: {status.video_fragments || '?'} / A: {status.audio_fragments || '?'}{' '}
-        / DL: {status.total_size || '?'}
-      </>
-    )}
-  </>,
-];
+  </>
+);
+
+const TaskProgress = ({ status }: { status: TaskWithStatus['status'] }) => {
+  if (status.total_size === null || status.total_size === undefined) {
+    return <Text color="dimmed">None</Text>;
+  }
+  return (
+    <Text size="sm">
+      V: {status.video_fragments || '?'} / A: {status.audio_fragments || '?'}{' '}
+      / DL: {status.total_size || '?'}
+    </Text>
+  );
+};
+
+const TaskBadges = ({ task, status }: TaskWithStatus) => (
+  <Group spacing="xs">
+    <TaskStateBadge state={status.state} />
+    <Badge color={platformColor(task.platform)} variant="light">
+      {task.platform}
+    </Badge>
+    <Badge color={providerColor(status.provider)} variant="light">
+      {providerLabel(status.provider)}
+    </Badge>
+  </Group>
+);
+
+const DesktopRow = ({ task, status }: TaskWithStatus) => (
+  <tr>
+    <td>
+      <Image width={160} height={90} radius="md" src={task.video_picture} />
+    </td>
+    <td>
+      <Stack spacing={4}>
+        <TaskTitle task={task} />
+        <TaskBadges task={task} status={status} />
+      </Stack>
+    </td>
+    <td>
+      <TaskProgress status={status} />
+    </td>
+    <td>
+      <Text size="xs" color="dimmed" style={{ maxWidth: 300 }} lineClamp={2}>
+        {status.last_output}
+      </Text>
+    </td>
+  </tr>
+);
+
+const MobileCard = ({ task, status }: TaskWithStatus) => (
+  <Card key={task.video_id}>
+    <Card.Section>
+      <AspectRatio ratio={16 / 9}>
+        <Image fit="cover" width="100%" src={task.video_picture} />
+      </AspectRatio>
+    </Card.Section>
+    <Stack my="lg" spacing="md">
+      <TaskTitle task={task} />
+      <TaskBadges task={task} status={status} />
+      <div>
+        <Text weight={700}>Progress</Text>
+        <TaskProgress status={status} />
+      </div>
+      {status.last_output && (
+        <div>
+          <Text weight={700} size="sm">
+            Last output
+          </Text>
+          <Text size="xs" color="dimmed" lineClamp={3}>
+            {status.last_output}
+          </Text>
+        </div>
+      )}
+    </Stack>
+  </Card>
+);
 
 const AddVideoModal = () => {
   const qConfig = useQueryConfig();
@@ -206,17 +313,13 @@ const TasksPage = () => {
             <tr>
               <th>Thumbnail</th>
               <th>Video</th>
-              <th>Status</th>
               <th>Progress</th>
+              <th>Last output</th>
             </tr>
           </thead>
           <tbody>
-            {tasks.map(({ task, status }) => (
-              <tr key={task.video_id}>
-                {rowElements({ task, status }).map((row, idx) => (
-                  <td key={idx}>{row}</td>
-                ))}
-              </tr>
+            {tasks.map((task) => (
+              <DesktopRow key={task.task.video_id} {...task} />
             ))}
           </tbody>
         </Table>
@@ -231,26 +334,9 @@ const TasksPage = () => {
             { maxWidth: 'xs', cols: 1, spacing: 'sm' },
           ]}
         >
-          {tasks.map(({ task, status }) => {
-            const [_, title, state, progres] = rowElements({ task, status });
-            return (
-              <Card key={task.video_id}>
-                <Card.Section>
-                  <AspectRatio ratio={16 / 9}>
-                    <Image fit="cover" width="100%" src={task.video_picture} />
-                  </AspectRatio>
-                </Card.Section>
-                <Stack my="lg" spacing="md">
-                  <div>{title}</div>
-                  {state}
-                  <div>
-                    <Text weight="bold">Progress</Text>
-                    {progres}
-                  </div>
-                </Stack>
-              </Card>
-            );
-          })}
+          {tasks.map((task) => (
+            <MobileCard key={task.task.video_id} {...task} />
+          ))}
         </SimpleGrid>
       </MediaQuery>
     </Stack>

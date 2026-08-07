@@ -1,83 +1,104 @@
 package main
 
 import (
+	"context"
 	"flag"
+	"log/slog"
 	"os"
-	"streamwatcher/helpers/webserver"
-	"streamwatcher/provider/twitch"
-	"streamwatcher/provider/youtube"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
+	"streamwatcher/common"
 	"streamwatcher/config"
-
-	"github.com/kataras/golog"
+	"streamwatcher/helpers/webserver"
+	"streamwatcher/provider/rplay"
+	"streamwatcher/provider/twitch"
+	"streamwatcher/provider/youtube"
 )
-
-var (
-	twitchMutex  sync.Mutex
-	youtubeMutex sync.Mutex
-)
-
-func safeTwitchCheck() {
-	if !twitchMutex.TryLock() {
-		golog.Debug("[System] Twitch checker is already running")
-		return
-	}
-	defer twitchMutex.Unlock()
-	golog.Debug("[System] Running Twitch check")
-	twitch.CheckLiveAllChannel()
-}
-
-func safeYouTubeCheck() {
-	if !youtubeMutex.TryLock() {
-		golog.Debug("[System] YouTube checker is already running")
-		return
-	}
-	defer youtubeMutex.Unlock()
-	golog.Debug("[System] Running YouTube check")
-	youtube.CheckLiveAllChannel()
-}
-
-func archivers() {
-	golog.Debug("[System] Scheduled check for live channels")
-	if config.AppConfig.Archive.YouTube {
-		safeYouTubeCheck()
-	}
-	if config.AppConfig.Archive.Twitch {
-		safeTwitchCheck()
-	}
-}
-
-func initialized() {
-	golog.Debug("[System] Creating directories if not exists")
-	createDirIfNotExist("temp")
-	createDirIfNotExist("downloads")
-}
-
-func createDirIfNotExist(dir string) {
-	err := os.MkdirAll(dir, os.ModePerm)
-	if err != nil {
-		golog.Fatal("Failed to create directory: ", err)
-	}
-}
 
 func main() {
-	config.LoadConfig()
-	go webserver.StartServer()
-	debug := flag.Bool("debug", false, "enable debug mode")
+	debug := flag.Bool("debug", false, "enable debug logging")
 	flag.Parse()
+
+	level := slog.LevelInfo
 	if *debug {
-		golog.SetLevel("debug")
+		level = slog.LevelDebug
 	}
-	golog.Infof("[System] Starting...")
-	initialized()
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	})))
 
-	archivers() // Initial check at startup
+	if err := config.LoadConfig(); err != nil {
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
+	}
 
-	ticker := time.NewTicker(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
+	if err := common.MkdirAll("temp", "downloads"); err != nil {
+		slog.Error("failed to initialize directories", "error", err)
+		os.Exit(1)
+	}
+
+	slog.Info("starting stream watcher")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server := webserver.NewServer()
+	server.Start()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		scheduler(ctx)
+	}()
+
+	// Run an initial check immediately.
+	checkAll(ctx)
+
+	// Wait for shutdown signal.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+
+	slog.Info("shutting down")
+	cancel()
+
+	// Give active downloads a grace period to clean up.
+	wg.Wait()
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Stop(shutdownCtx); err != nil {
+		slog.Error("failed to stop web server gracefully", "error", err)
+	}
+}
+
+func scheduler(ctx context.Context) {
+	ticker := time.NewTicker(config.CheckInterval())
 	defer ticker.Stop()
-	for range ticker.C {
-		archivers()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkAll(ctx)
+		}
+	}
+}
+
+func checkAll(ctx context.Context) {
+	cfg := config.Get().Archive
+	if cfg.YouTube {
+		youtube.CheckLiveAllChannel(ctx)
+	}
+	if cfg.Twitch {
+		twitch.CheckLiveAllChannel(ctx)
+	}
+	if cfg.RPLAY {
+		rplay.CheckLiveAllChannel(ctx)
 	}
 }

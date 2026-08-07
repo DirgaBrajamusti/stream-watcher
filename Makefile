@@ -1,28 +1,28 @@
-# Name of the binary to build
-BINARY_NAME=super-bad-stream-watcher
+BINARY_NAME=stream-watcher
 
-# Go source files
 SRC=$(shell find . -name "*.go" -type f)
 
-# Build the binary for the current platform
-build:
-	go build o $(BINARY_NAME) ./cmd
+.PHONY: build build-debug build-linux clean test fmt frontend
 
-build-debug:
+build: frontend
+	go build -o $(BINARY_NAME) ./cmd
+
+build-debug: frontend
 	go build -tags=debug -o $(BINARY_NAME) ./cmd
 
-build-linux:
+build-linux: frontend
 	GOOS=linux go build -o $(BINARY_NAME) ./cmd
 
-# Clean the project
+frontend:
+	cd helpers/webserver/frontend && yarn install && yarn build
+
 clean:
 	go clean
 	rm -f $(BINARY_NAME)
+	rm -rf helpers/webserver/frontend/dist
 
-# Run the tests
 test:
 	go test -v ./...
 
-# Format the source code
 fmt:
 	gofmt -w $(SRC)

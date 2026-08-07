@@ -1,280 +1,265 @@
 package webserver
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
+	"strings"
+	"time"
+
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/ytarchive"
 	"streamwatcher/provider/twitch"
 	"streamwatcher/provider/youtube"
-	"strings"
-	"sync"
-	"time"
-
-	"github.com/kataras/golog"
 )
+
+const appVersion = "0.1.0"
 
 //go:embed frontend/dist/*
 var staticFiles embed.FS
 
-// spaFileSystem is a custom file system wrapper for SPA
+// spaFileSystem is a custom file system wrapper for a single-page application.
 type spaFileSystem struct {
-	http.FileSystem
+	fs    http.FileSystem
 	index string
 }
 
-func (fs spaFileSystem) Open(path string) (http.File, error) {
-	f, err := fs.FileSystem.Open(path)
+func (s spaFileSystem) Open(path string) (http.File, error) {
+	f, err := s.fs.Open(path)
 	if err != nil {
-		return fs.FileSystem.Open(fs.index)
+		return s.fs.Open(s.index)
 	}
-	return f, err
+	return f, nil
 }
 
-func StartServer() {
-	// API routes
-	http.HandleFunc("/api/tasks", getDownloadJobs)
-	http.HandleFunc("/api/task", addTask)
-	http.HandleFunc("/api/config/toml", tomlConfig)
-	http.HandleFunc("/api/config", getConfig)
+// Server wraps the HTTP server used by the application.
+type Server struct {
+	srv *http.Server
+}
 
-	// Static files handling
+// NewServer creates a web server configured with the current application settings.
+func NewServer() *Server {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /api/tasks", getDownloadJobs)
+	mux.HandleFunc("POST /api/task", addTask)
+	mux.HandleFunc("GET /api/config", getConfig)
+	mux.HandleFunc("GET /api/config/toml", tomlConfig)
+	mux.HandleFunc("PUT /api/config/toml", tomlConfig)
+
 	staticFS, err := fs.Sub(staticFiles, "frontend/dist")
 	if err != nil {
-		golog.Fatal(err)
-	}
-
-	spa := spaFileSystem{
-		FileSystem: http.FS(staticFS),
-		index:      "index.html",
-	}
-
-	http.Handle("/", http.FileServer(spa))
-	golog.Info(http.ListenAndServe(fmt.Sprintf("%s:%s", config.AppConfig.Webserver.Host, config.AppConfig.Webserver.Port), nil))
-}
-func addTask(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var task JSONAddTask
-	err := json.NewDecoder(r.Body).Decode(&task)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	parsedUrl, err := url.Parse(task.YoutubeUrl)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if parsedUrl.Host == "twitch.tv" || parsedUrl.Host == "www.twitch.tv" {
-		twitchUsername := strings.TrimPrefix(parsedUrl.Path, "/")
-		channelLive, err := twitch.GetChannelInfo(twitchUsername)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if channelLive == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			response := map[string]interface{}{
-				"message": "Task not added",
-				"status":  "Channel maybe offline",
-			}
-			json.NewEncoder(w).Encode(response)
-			return
-		}
-		go func() {
-			twitch.TwitchStartDownload(twitchUsername, channelLive, task.OutPath)
-		}()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		response := map[string]interface{}{
-			"message": "Task added successfully",
-			"status":  channelLive,
-		}
-		json.NewEncoder(w).Encode(response)
+		slog.Warn("webserver: frontend dist not found; static files will not be served", "error", err)
 	} else {
-		url := youtube.ParseVideoID(parsedUrl)
-		if url == nil {
-			http.Error(w, "Invalid YouTube URL", http.StatusBadRequest)
-			return
-		} else {
-			channelLive, err := youtube.GetVideoDetailsFromID(*url)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			go func() {
-				golog.Info("[webserver] Added task for video from api: ", channelLive.VideoID)
-				ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, task.OutPath)
-			}()
+		spa := spaFileSystem{fs: http.FS(staticFS), index: "index.html"}
+		mux.Handle("/", http.FileServer(spa))
+	}
 
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusCreated)
-			response := map[string]interface{}{
-				"message": "Task added successfully",
-				"status":  channelLive,
-			}
-			json.NewEncoder(w).Encode(response)
+	return &Server{
+		srv: &http.Server{
+			Addr:         config.ListenAddr(),
+			Handler:      mux,
+			ReadTimeout:  15 * time.Second,
+			WriteTimeout: 15 * time.Second,
+			IdleTimeout:  60 * time.Second,
+		},
+	}
+}
+
+// Start starts the web server in a goroutine.
+func (s *Server) Start() {
+	go func() {
+		slog.Info("webserver: listening", "addr", s.srv.Addr)
+		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("webserver: server error", "error", err)
 		}
-	}
-
+	}()
 }
+
+// Stop gracefully shuts down the web server.
+func (s *Server) Stop(ctx context.Context) error {
+	return s.srv.Shutdown(ctx)
+}
+
 func getDownloadJobs(w http.ResponseWriter, r *http.Request) {
-	common.DownloadJobsLock.Lock()
-	defer common.DownloadJobsLock.Unlock()
-
-	jobsSlice := convertDownloadJobsToResponse(common.DownloadJobs)
-	if jobsSlice == nil {
-		jobsSlice = []Response{}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jobsSlice)
-}
-
-func convertDownloadJobsToResponse(jobs map[string]*common.DownloadJob) []Response {
-	var responses []Response
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	// Precompile regex patterns
-	// sizePattern := regexp.MustCompile(`size=\s*([\d.]+[KMG]i?B?)\s*time=.*bitrate=([\d.]+[kMG]?bits/s)\s*speed=([\d.]+x)`)
-	// fragmentsPattern := regexp.MustCompile(`Video Fragments:\s*(\d+);\s*Audio Fragments:\s*(\d+);\s*Total Downloaded:\s*([\d.]+[KMG]i?B?)`)
-
+	jobs := common.DefaultStore.List()
+	responses := make([]JobResponse, 0, len(jobs))
 	for _, job := range jobs {
-		wg.Add(1)
-		go func(job *common.DownloadJob) {
-			defer wg.Done()
-			response := Response{
-				Task: Task{
-					Title:           job.ChannelLive.Title,
-					VideoID:         job.VideoID,
-					VideoPicture:    job.ChannelLive.ThumbnailUrl,
-					ChannelName:     job.ChannelLive.ChannelName,
-					ChannelID:       job.ChannelLive.ChannelID,
-					ChannelPicture:  job.ChannelLive.ChannelPicture,
-					OutputDirectory: job.OutPath,
-				},
-				Status: Status{
-					Version:        "",
-					State:          job.Status,
-					LastOutput:     job.Output,
-					LastUpdate:     job.ChannelLive.DateCrawled,
-					VideoFragments: job.VideoFragments,
-					AudioFragments: job.AudioFragments,
-					TotalSize:      job.TotalSize,
-					VideoQuality:   nil,
-					OutputFile:     job.FinalFile,
-				},
-			}
-			mu.Lock()
-			responses = append(responses, response)
-			mu.Unlock()
-		}(job)
+		responses = append(responses, jobToResponse(job))
 	}
-
-	wg.Wait()
 
 	sort.Slice(responses, func(i, j int) bool {
-		timeI, _ := time.Parse(time.RFC3339, responses[i].Status.LastUpdate)
-		timeJ, _ := time.Parse(time.RFC3339, responses[j].Status.LastUpdate)
-		return timeI.Before(timeJ)
+		return responses[i].Status.LastUpdate < responses[j].Status.LastUpdate
 	})
 
-	return responses
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(responses); err != nil {
+		slog.Error("webserver: failed to encode jobs", "error", err)
+	}
 }
 
-func parseOutput(output string, sizePattern, fragmentsPattern *regexp.Regexp) (map[string]string, error) {
-	if strings.HasPrefix(output, "size=") {
-		matches := sizePattern.FindStringSubmatch(output)
-		if len(matches) != 4 {
-			return nil, fmt.Errorf("failed to parse output")
-		}
-
-		result := map[string]string{
-			"TotalSize":      matches[1],
-			"VideoFragments": "0",
-			"AudioFragments": "0",
-		}
-		return result, nil
-	} else if strings.HasPrefix(output, "Video Fragments: ") {
-		matches := fragmentsPattern.FindStringSubmatch(output)
-		if len(matches) != 4 {
-			return nil, fmt.Errorf("failed to parse output")
-		}
-		result := map[string]string{
-			"TotalSize":      matches[3],
-			"VideoFragments": matches[1],
-			"AudioFragments": matches[2],
-		}
-		return result, nil
+func addTask(w http.ResponseWriter, r *http.Request) {
+	var req AddTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		return
 	}
-	return nil, fmt.Errorf("output does not start with expected pattern")
+	if req.VideoURL == "" {
+		http.Error(w, "video_url is required", http.StatusBadRequest)
+		return
+	}
+
+	parsed, err := url.Parse(req.VideoURL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid url: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	if isTwitchURL(parsed.Host) {
+		username := strings.TrimPrefix(parsed.Path, "/")
+		live, err := twitch.GetChannelInfo(ctx, username)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("twitch lookup failed: %v", err), http.StatusBadRequest)
+			return
+		}
+		if live == nil {
+			writeJSON(w, http.StatusCreated, MessageResponse{Message: "Task not added", Status: "channel is offline"})
+			return
+		}
+		go twitch.StartDownload(ctx, username, live, req.OutPath)
+		writeJSON(w, http.StatusCreated, MessageResponse{Message: "Task added successfully", Status: live})
+		return
+	}
+
+	videoID, ok := youtube.ParseVideoID(parsed)
+	if !ok {
+		http.Error(w, "invalid YouTube URL", http.StatusBadRequest)
+		return
+	}
+
+	live, err := youtube.GetVideoDetailsFromID(ctx, videoID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("youtube lookup failed: %v", err), http.StatusBadRequest)
+		return
+	}
+	go ytarchive.StartDownload(ctx,
+		fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID),
+		[]string{}, live, req.OutPath)
+	writeJSON(w, http.StatusCreated, MessageResponse{Message: "Task added successfully", Status: live})
 }
 
 func getConfig(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	var response ConfigResponse
-
-	for _, channel := range config.AppConfig.YouTubeChannel {
-		response.Channel = append(response.Channel, Channel{
-			ID:               channel.ID,
-			Name:             channel.Name,
-			Filters:          channel.Filters,
-			MatchDescription: false,
-			Outpath:          channel.OutPath,
-			PictureURL:       "",
+	cfg := config.Get()
+	resp := ConfigResponse{Channel: make([]ChannelResponse, 0, len(cfg.YouTubeChannel))}
+	for _, channel := range cfg.YouTubeChannel {
+		resp.Channel = append(resp.Channel, ChannelResponse{
+			ID:      channel.ID,
+			Name:    channel.Name,
+			Filters: channel.Filters,
+			Outpath: channel.OutPath,
 		})
 	}
-
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func tomlConfig(w http.ResponseWriter, r *http.Request) {
-	filePath := "./config.toml"
+	const filePath = "./config.toml"
 
 	switch r.Method {
 	case http.MethodGet:
 		content, err := os.ReadFile(filePath)
 		if err != nil {
 			http.Error(w, "Unable to read config file", http.StatusInternalServerError)
-			golog.Warn("Error reading config file:", err)
+			slog.Warn("webserver: failed to read config file", "error", err)
 			return
 		}
+		w.Header().Set("Content-Type", "application/toml")
 		w.Write(content)
 
 	case http.MethodPut:
 		content, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, "Unable to read request body", http.StatusBadRequest)
-			golog.Warn("Error reading request body:", err)
 			return
 		}
-
-		err = os.WriteFile(filePath, content, 0644)
-		if err != nil {
-			http.Error(w, "Unable to write to config file", http.StatusInternalServerError)
-			golog.Warn("Error writing to config file:", err)
+		if err := os.WriteFile(filePath, content, 0o644); err != nil {
+			http.Error(w, "Unable to write config file", http.StatusInternalServerError)
+			slog.Warn("webserver: failed to write config file", "error", err)
 			return
 		}
-
 		w.WriteHeader(http.StatusNoContent)
 
 	default:
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func isTwitchURL(host string) bool {
+	return host == "twitch.tv" || host == "www.twitch.tv"
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(payload); err != nil {
+		slog.Error("webserver: failed to encode response", "error", err)
+	}
+}
+
+func jobToResponse(job *common.DownloadJob) JobResponse {
+	videoURL, channelURL := platformURLs(job)
+	return JobResponse{
+		Task: TaskResponse{
+			Title:           job.ChannelLive.Title,
+			VideoID:         job.VideoID,
+			VideoURL:        videoURL,
+			VideoPicture:    job.ChannelLive.ThumbnailURL,
+			ChannelName:     job.ChannelLive.ChannelName,
+			ChannelID:       job.ChannelLive.ChannelID,
+			ChannelURL:      channelURL,
+			ChannelPicture:  job.ChannelLive.ChannelPicture,
+			OutputDirectory: job.OutPath,
+			Platform:        job.ChannelLive.Platform,
+		},
+		Status: StatusResponse{
+			Version:        appVersion,
+			State:          string(job.Status),
+			Provider:       job.Provider,
+			LastOutput:     job.Output,
+			LastUpdate:     job.UpdatedAt.Format(time.RFC3339),
+			VideoFragments: job.VideoFragments,
+			AudioFragments: job.AudioFragments,
+			TotalSize:      job.TotalSize,
+			OutputFile:     job.FinalFile,
+		},
+	}
+}
+
+func platformURLs(job *common.DownloadJob) (videoURL, channelURL string) {
+	switch job.ChannelLive.Platform {
+	case "twitch":
+		channelURL = fmt.Sprintf("https://twitch.tv/%s", job.ChannelLive.ChannelName)
+		videoURL = channelURL
+	case "youtube":
+		channelURL = fmt.Sprintf("https://www.youtube.com/channel/%s", job.ChannelLive.ChannelID)
+		videoURL = fmt.Sprintf("https://www.youtube.com/watch?v=%s", job.VideoID)
+	case "rplay":
+		channelURL = fmt.Sprintf("https://rplay.live/creator/%s", job.ChannelLive.ChannelID)
+		videoURL = channelURL
+	default:
+		videoURL = ""
+		channelURL = ""
+	}
+	return videoURL, channelURL
 }

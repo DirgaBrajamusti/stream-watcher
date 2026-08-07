@@ -1,26 +1,42 @@
 package youtube
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
+	"time"
+
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
 	"streamwatcher/helpers/ytarchive"
-
-	"strings"
-	"time"
-
-	"github.com/kataras/golog"
 )
 
-// NetscapeCookie represents a cookie in Netscape format
-type NetscapeCookie struct {
+const (
+	ytBaseURL = "https://www.youtube.com"
+)
+
+var (
+	reLive         = regexp.MustCompile(`"text\+":"LIVE"`)
+	reVideoID      = regexp.MustCompile(`"videoId":"([^"]+)`)
+	reMembersOnly  = regexp.MustCompile(`"[a-zA-Z]+":"Members only"`)
+	reTitle        = regexp.MustCompile(`title\":{\"runs\":\[\{\"text\":\"([^\"]+)`)
+	reChannelPic   = regexp.MustCompile(`<meta name="twitter:image" content="(.*?)">`)
+	reChannelName  = regexp.MustCompile(`<meta\s+property="og:title"\s+content="([^"]+)">`)
+	reVideoTitle   = regexp.MustCompile(`"videoDetails":\{"videoId":"[^"]+","title":"([^"]+)"`)
+	reVideoChannel = regexp.MustCompile(`"videoDetails":\{[^}]*"channelId":"([^"]+)"`)
+	reChannelName2 = regexp.MustCompile(`ChannelName":"(.*?)"`)
+)
+
+// netscapeCookie represents a single line in a Netscape cookie file.
+type netscapeCookie struct {
 	Domain     string
 	Flag       string
 	Path       string
@@ -30,290 +46,256 @@ type NetscapeCookie struct {
 	Value      string
 }
 
-// ParseNetscapeCookieFile reads and parses cookies from a Netscape format cookie file
+// ParseNetscapeCookieFile reads cookies from a Netscape-format cookie file.
 func ParseNetscapeCookieFile(filepath string) ([]*http.Cookie, error) {
 	content, err := os.ReadFile(filepath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read cookie file: %v", err)
+		return nil, fmt.Errorf("read cookie file: %w", err)
 	}
 
 	var cookies []*http.Cookie
-	lines := strings.Split(string(content), "\n")
-
-	for _, line := range lines {
-		// Skip comments and empty lines
-		if strings.HasPrefix(line, "#") || len(strings.TrimSpace(line)) == 0 {
+	for _, line := range strings.Split(string(content), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-
-		fields := strings.Split(strings.TrimSpace(line), "\t")
+		fields := strings.Split(line, "\t")
 		if len(fields) < 7 {
 			continue
 		}
 
-		expiration, err := time.Parse("2006", fields[4])
-		if err != nil {
-			expireInt := int64(0)
-			fmt.Sscanf(fields[4], "%d", &expireInt)
-			expiration = time.Unix(expireInt, 0)
+		expires := int64(0)
+		if _, err := fmt.Sscanf(fields[4], "%d", &expires); err != nil {
+			expires = 0
 		}
 
-		cookie := &http.Cookie{
+		cookies = append(cookies, &http.Cookie{
 			Domain:   fields[0],
 			Path:     fields[2],
 			Secure:   fields[3] == "TRUE",
-			Expires:  expiration,
+			Expires:  time.Unix(expires, 0),
 			Name:     fields[5],
 			Value:    fields[6],
 			HttpOnly: true,
-		}
-		cookies = append(cookies, cookie)
+		})
 	}
-
 	return cookies, nil
 }
 
-func GetChannelLive(channelID string, useMemberCookies bool) (*common.ChannelLive, error) {
-	// Create a cookie jar
+// httpClientWithCookies returns an HTTP client that includes the configured cookies.
+func httpClientWithCookies(useMemberCookies bool) (*http.Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %v", err)
+		return nil, fmt.Errorf("create cookie jar: %w", err)
 	}
 
-	// Parse and set cookies if file path is provided
-	var cookieFilePath string
-	if config.AppConfig.Archive.Cookies != "" {
-		if useMemberCookies {
-			cookieFilePath = config.AppConfig.Archive.MemberCookies
-		} else {
-			cookieFilePath = config.AppConfig.Archive.Cookies
-		}
-	} else {
-		cookieFilePath = ""
+	cfg := config.Get().Archive
+	cookiePath := cfg.Cookies
+	if useMemberCookies && cfg.MemberCookies != "" {
+		cookiePath = cfg.MemberCookies
 	}
-	if cookieFilePath != "" {
-		cookies, err := ParseNetscapeCookieFile(cookieFilePath)
+
+	if cookiePath != "" {
+		cookies, err := ParseNetscapeCookieFile(cookiePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse cookie file: %v", err)
+			return nil, err
 		}
-
-		ytUrl, _ := url.Parse("https://www.youtube.com")
-		jar.SetCookies(ytUrl, cookies)
+		u, _ := url.Parse(ytBaseURL)
+		jar.SetCookies(u, cookies)
 	}
 
-	// Create HTTP client with cookie jar
-	client := &http.Client{
-		Jar: jar,
-	}
+	return &http.Client{Jar: jar, Timeout: 30 * time.Second}, nil
+}
 
-	// Make request with cookies
-	// resp, err := client.Get(fmt.Sprintf("https://www.youtube.com/channel/%s/live", channelID))
-	resp, err := client.Get(fmt.Sprintf("https://www.youtube.com/channel/%s/streams", channelID))
+// GetChannelLive checks a YouTube channel's streams page and returns the first live
+// stream that matches the channel configuration.
+func GetChannelLive(ctx context.Context, channelID string, useMemberCookies bool) (*common.ChannelLive, error) {
+	client, err := httpClientWithCookies(useMemberCookies)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/channel/%s/streams", ytBaseURL, channelID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch channel streams: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
+
 	fragments := strings.Split(string(body), "videoRenderer")
-	for _, fragment := range fragments {
-		reLive := regexp.MustCompile(`"text+":"LIVE"`)
-		if reLive.MatchString(fragment) {
-			reVideoID := regexp.MustCompile(`"videoId":"([^"]+)`)
-			videoID := reVideoID.FindStringSubmatch(fragment)
-			reMembersOnly := regexp.MustCompile(`"[a-zA-Z]+":"Members only"`)
-			isMembersOnly := false
-			if reMembersOnly.MatchString(fragment) {
-				golog.Debug("[youtube] channel is live but members only: ", channelID)
-				isMembersOnly = true
-
-			}
-			if len(videoID) < 2 {
-				return nil, fmt.Errorf("no video id found")
-			}
-			reTitle := regexp.MustCompile(`title":{"runs":\[{"text":"([^"]+)`)
-			title := reTitle.FindStringSubmatch(fragment)
-			if len(title) < 2 {
-				return nil, fmt.Errorf("no title found")
-			}
-
-			reChannelPic := regexp.MustCompile(`<meta name="twitter:image" content="(.*?)"`)
-			channelPic := reChannelPic.FindStringSubmatch(string(body))
-			if len(channelPic) < 2 {
-				return nil, fmt.Errorf("no channel pic found")
-			}
-
-			reChannelName := regexp.MustCompile(`<meta\s+property="og:title"\s+content="([^"]+)">`)
-			channelName := reChannelName.FindStringSubmatch(string(body))
-			if len(channelName) < 2 {
-				return nil, fmt.Errorf("no channel name found")
-			}
-
-			dateCrawled := time.Now().UTC().Format(time.RFC3339Nano)
-			return &common.ChannelLive{
-				Title:          title[1],
-				ChannelID:      channelID,
-				ThumbnailUrl:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID[1]),
-				VideoID:        videoID[1],
-				ChannelName:    channelName[1],
-				ChannelPicture: channelPic[1],
-				DateCrawled:    dateCrawled,
-				MembersOnly:    isMembersOnly,
-			}, nil
+	for _, fragment := range fragments[1:] {
+		if !reLive.MatchString(fragment) {
+			continue
 		}
+
+		videoID := firstMatch(reVideoID, fragment)
+		if videoID == "" {
+			continue
+		}
+		title := firstMatch(reTitle, fragment)
+		if title == "" {
+			continue
+		}
+
+		channelName := firstMatch(reChannelName, string(body))
+		channelPic := firstMatch(reChannelPic, string(body))
+		isMembersOnly := reMembersOnly.MatchString(fragment)
+		dateCrawled := time.Now().UTC()
+
+		return &common.ChannelLive{
+			Title:          title,
+			ChannelID:      channelID,
+			ThumbnailURL:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID),
+			VideoID:        videoID,
+			ChannelName:    channelName,
+			ChannelPicture: channelPic,
+			DateCrawled:    dateCrawled,
+			MembersOnly:    isMembersOnly,
+			Platform:       "youtube",
+		}, nil
 	}
 	return nil, nil
 }
 
-func GetVideoDetailsFromID(videoID string) (*common.ChannelLive, error) {
-	// Create a cookie jar
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create cookie jar: %v", err)
-	}
-
-	// Parse and set cookies if file path is provided
-	var cookieFilePath string
-	if config.AppConfig.Archive.Cookies != "" {
-		cookieFilePath = config.AppConfig.Archive.Cookies
-	} else {
-		cookieFilePath = ""
-	}
-	if cookieFilePath != "" {
-		cookies, err := ParseNetscapeCookieFile(cookieFilePath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse cookie file: %v", err)
-		}
-
-		ytUrl, _ := url.Parse("https://www.youtube.com")
-		jar.SetCookies(ytUrl, cookies)
-	}
-
-	// Create HTTP client with cookie jar
-	client := &http.Client{
-		Jar: jar,
-	}
-
-	// Make request with cookies
-	resp, err := client.Get(fmt.Sprintf("https://www.youtube.com/watch?v=%s", videoID))
+// GetVideoDetailsFromID fetches video details from a YouTube video ID.
+func GetVideoDetailsFromID(ctx context.Context, videoID string) (*common.ChannelLive, error) {
+	client, err := httpClientWithCookies(false)
 	if err != nil {
 		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/watch?v=%s", ytBaseURL, videoID), nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch video details: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
 
-	reTitle := regexp.MustCompile(`"videoDetails":\{"videoId":"[^"]+","title":"([^"]+)"`)
-	title := reTitle.FindStringSubmatch(string(body))
-	if len(title) < 2 {
-		return nil, fmt.Errorf("no title found")
+	title := firstMatch(reVideoTitle, string(body))
+	if title == "" {
+		return nil, fmt.Errorf("no title found for video %s", videoID)
 	}
-
-	reChannelId := regexp.MustCompile(`"videoDetails":\{[^}]*"channelId":"([^"]+)"`)
-	channelId := reChannelId.FindStringSubmatch(string(body))
-	if len(channelId) < 2 {
-		return nil, fmt.Errorf("no channel id found")
+	channelID := firstMatch(reVideoChannel, string(body))
+	if channelID == "" {
+		return nil, fmt.Errorf("no channel id found for video %s", videoID)
 	}
-
-	reChannelPic := regexp.MustCompile(`<meta name="twitter:image" content="(.*?)"`)
-	channelPic := reChannelPic.FindStringSubmatch(string(body))
-
-	if len(channelPic) < 2 {
-		return nil, fmt.Errorf("no channel pic found")
-	}
-
-	reChannelName := regexp.MustCompile(`ChannelName":"(.*?)"`)
-	channelName := reChannelName.FindStringSubmatch(string(body))
-
-	if len(channelName) < 2 {
-		return nil, fmt.Errorf("no channel name found")
-	}
-
-	dateCrawled := time.Now().UTC().Format(time.RFC3339Nano)
+	channelPic := firstMatch(reChannelPic, string(body))
+	channelName := firstMatch(reChannelName2, string(body))
 
 	return &common.ChannelLive{
-		Title:          title[1],
-		ChannelID:      channelId[1],
-		ThumbnailUrl:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID),
+		Title:          title,
+		ChannelID:      channelID,
+		ThumbnailURL:   fmt.Sprintf("https://img.youtube.com/vi/%s/0.jpg", videoID),
 		VideoID:        videoID,
-		ChannelName:    channelName[1],
-		ChannelPicture: channelPic[1],
-		DateCrawled:    dateCrawled,
+		ChannelName:    channelName,
+		ChannelPicture: channelPic,
+		DateCrawled:    time.Now().UTC(),
+		Platform:       "youtube",
 	}, nil
 }
 
-func CheckLiveAllChannel() {
-	for i, channel := range config.AppConfig.YouTubeChannel {
-		golog.Info("[youtube] checking live: ", channel.Name)
-		channelLive, err := GetChannelLive(channel.ID, channel.UseMemberCookies)
+// CheckLiveAllChannel checks every configured YouTube channel for live streams.
+func CheckLiveAllChannel(ctx context.Context) {
+	cfg := config.Get()
+	for i, channel := range cfg.YouTubeChannel {
+		slog.Info("youtube: checking channel", "channel", channel.Name)
+		live, err := GetChannelLive(ctx, channel.ID, channel.UseMemberCookies)
 		if err != nil {
-			golog.Error(err)
+			slog.Error("youtube: failed to fetch channel", "channel", channel.Name, "error", err)
+			continue
+		}
+		if live == nil {
+			slog.Debug("youtube: channel is not live", "channel", channel.Name)
+			continue
 		}
 
-		if checkingLiveCondition(channelLive, &channel) {
-			discord.SendNotificationWebhook(channelLive.ChannelName, channelLive.Title, "https://www.youtube.com/watch?v="+channelLive.VideoID, channelLive.ThumbnailUrl, "Recording")
-			go func() {
-				ytarchive.StartDownload("https://www.youtube.com/watch?v="+channelLive.VideoID, []string{}, channelLive, channel.OutPath)
-			}()
+		if shouldDownload(live, channel) {
+			slog.Info("youtube: live stream detected", "channel", channel.Name, "title", live.Title)
+			discord.SendNotification(ctx, live.ChannelName, live.Title,
+				fmt.Sprintf("https://www.youtube.com/watch?v=%s", live.VideoID), live.ThumbnailURL, "Recording")
+			go ytarchive.StartDownload(ctx,
+				fmt.Sprintf("https://www.youtube.com/watch?v=%s", live.VideoID),
+				[]string{}, live, channel.OutPath)
 		}
-		if i < len(config.AppConfig.YouTubeChannel)-1 {
-			golog.Debug("[youtube] sleeping before checking next channel for ", config.AppConfig.Archive.Checker, "minutes")
-			time.Sleep(time.Duration(config.AppConfig.Archive.Checker) * time.Minute)
+
+		if i < len(cfg.YouTubeChannel)-1 {
+			select {
+			case <-time.After(config.CheckInterval()):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 }
 
-func checkingLiveCondition(channelLive *common.ChannelLive, channel *config.YouTubeChannel) bool {
-	if channelLive == nil {
+// shouldDownload applies channel rules to decide whether to record the live stream.
+func shouldDownload(live *common.ChannelLive, channel config.YouTubeChannel) bool {
+	if live == nil {
 		return false
 	}
-
-	if common.IsVideoIDInDownloadJobs(channelLive.VideoID) {
-		golog.Debug("[youtube] live is in download jobs: ", channel.Name)
+	if common.DefaultStore.Exists(live.VideoID) {
+		slog.Debug("youtube: video already in download jobs", "video_id", live.VideoID)
 		return false
 	}
-
-	if channelLive.MembersOnly && !channel.UseMemberCookies {
-		golog.Debug("[youtube] live is members only, but not using member cookies: ", channel.Name)
+	if live.MembersOnly && !channel.UseMemberCookies {
+		slog.Debug("youtube: members-only stream without member cookies", "video_id", live.VideoID)
 		return false
 	}
-
-	videoInRegex := common.CheckVideoRegex(channelLive.Title, channel.Filters)
-	if videoInRegex || (channelLive.MembersOnly && channel.AlwaysDownloadMember) {
-		golog.Info("[youtube] live in: ", channel.Name, " - is memberonly", channelLive.MembersOnly, " - video in regex: ", videoInRegex, " - always download member: ", channel.AlwaysDownloadMember)
+	if common.MatchFilters(live.Title, channel.Filters) {
 		return true
 	}
-
-	golog.Debug("[youtube] live is not in regex: ", channel.Name)
+	if live.MembersOnly && channel.AlwaysDownloadMember {
+		return true
+	}
+	slog.Debug("youtube: stream does not match filters", "title", live.Title)
 	return false
 }
 
-func ParseVideoID(parsedURI *url.URL) *string {
-	host := parsedURI.Host
-	path := parsedURI.Path
+// ParseVideoID extracts a YouTube video ID from a URL.
+func ParseVideoID(parsed *url.URL) (string, bool) {
+	host := parsed.Host
+	path := parsed.Path
 
-	if host == "youtu.be" {
-		id := path[1:]
-		return &id
+	switch {
+	case host == "youtu.be":
+		id := strings.TrimPrefix(path, "/")
+		return id, id != ""
+	case strings.HasPrefix(path, "/live/"):
+		id := strings.TrimPrefix(path, "/live/")
+		return id, id != ""
+	case path == "/watch":
+		id := parsed.Query().Get("v")
+		return id, id != ""
 	}
+	return "", false
+}
 
-	if strings.HasPrefix(path, "/live/") {
-		id := path[6:]
-		return &id
+func firstMatch(re *regexp.Regexp, text string) string {
+	matches := re.FindStringSubmatch(text)
+	if len(matches) < 2 {
+		return ""
 	}
-
-	if path == "/watch" {
-		query := parsedURI.Query()
-		if id, ok := query["v"]; ok && len(id) > 0 {
-			return &id[0]
-		}
-	}
-
-	return nil
+	return matches[1]
 }

@@ -1,106 +1,83 @@
 package streamlink
 
 import (
-	"os/exec"
+	"context"
+	"fmt"
+	"log/slog"
 	"path/filepath"
-	"runtime"
+	"strings"
+
 	"streamwatcher/common"
 	"streamwatcher/config"
 	"streamwatcher/helpers/discord"
-	"strings"
-	"sync"
-
-	"github.com/kataras/golog"
 )
 
-const (
-	moduleName string = "[streamlink] "
-)
-
-var waitOutputPath bool
-
-func StartDownload(url string, args []string, channelLive *common.ChannelLive, outPath string) {
-	var cmd *exec.Cmd
-	var allArgs []string
-	allArgs = append(allArgs, args...)
-	allArgs = append(allArgs, url)
-	allArgs = append(allArgs, config.AppConfig.Streamlink.Args...)
-
-	if runtime.GOOS == "windows" {
-		cmdArgs := append([]string{"/C", config.AppConfig.Streamlink.ExecutablePath}, allArgs...)
-		cmd = exec.Command("cmd", cmdArgs...)
-		cmd.Dir = config.AppConfig.Streamlink.WorkingDirectory
-		golog.Debug(moduleName, "spawning jobs in windows: ", strings.Join(allArgs, " "))
-	} else {
-		cmd = exec.Command(config.AppConfig.Streamlink.ExecutablePath, allArgs...)
-		cmd.Dir = config.AppConfig.Streamlink.WorkingDirectory
-		golog.Debug(moduleName, "spawning jobs: ", strings.Join(allArgs, " "))
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		golog.Debug(moduleName, "Error creating StdoutPipe:", err)
-		return
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		golog.Debug(moduleName, "Error creating StderrPipe:", err)
-		return
-	}
-
-	common.AddDownloadJob(channelLive.VideoID, *channelLive, "Idle", "", outPath)
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		golog.Warn(moduleName, "Failed to start command: ", err)
-		return
-	}
-	outputBuffer := make([]byte, 4096)
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go common.ReadStdout(stdout, outputBuffer, parseOutput, channelLive.VideoID, &wg, "yt-dlp")
-
-	// Read stderr (in case progress is written to stderr)
-	go common.ReadStderr(stderr, outputBuffer, parseOutput, channelLive.VideoID, &wg, "yt-dlp")
-
-	wg.Wait()
-
-	if err := cmd.Wait(); err != nil {
-		golog.Warn(moduleName, "Error waiting for command to finish: ", err)
-	}
-
-	filename := filepath.Base(common.DownloadJobs[channelLive.VideoID].FinalFile)
-	if err := common.MoveFile(common.DownloadJobs[channelLive.VideoID].FinalFile, common.DownloadJobs[channelLive.VideoID].OutPath+"/"+filename); err != nil {
-		golog.Warn(moduleName, "Failed to move file: ", err)
-	}
-	common.DownloadJobs[channelLive.VideoID].FinalFile = common.DownloadJobs[channelLive.VideoID].OutPath + "/" + filename
-	discord.SendNotificationWebhook(common.DownloadJobs[channelLive.VideoID].ChannelLive.ChannelName, common.DownloadJobs[channelLive.VideoID].ChannelLive.Title, "https://twitch.tv"+common.DownloadJobs[channelLive.VideoID].ChannelLive.ChannelName, common.DownloadJobs[channelLive.VideoID].ChannelLive.ThumbnailUrl, "Done")
-
-	golog.Debug(moduleName, "Download finished")
+type parser struct {
+	job            *common.DownloadJob
+	waitOutputPath bool
 }
 
-func parseOutput(output string, videoId string) {
-	golog.Debug(moduleName, "Parsing output: ", output)
-	common.DownloadJobsLock.Lock()
-	defer common.DownloadJobsLock.Unlock()
-	common.DownloadJobs[videoId].Output = output
+// StartDownload begins a streamlink download for the given URL.
+func StartDownload(ctx context.Context, url string, args []string, channelLive *common.ChannelLive, outPath string) {
+	cfg := config.Get().Streamlink
 
-	if waitOutputPath {
-		common.DownloadJobs[videoId].FinalFile = output
-		golog.Info(moduleName, "output path: ", output)
-		common.DownloadJobs[videoId].Status = "Downloading"
-		golog.Info(moduleName, "Downloading: ", output)
-		waitOutputPath = false
-	}
-	if strings.Contains(output, "Writing output to") && !waitOutputPath {
-		waitOutputPath = true
+	job := common.NewDownloadJob(channelLive.VideoID, *channelLive, common.StatusIdle, outPath)
+	job.Provider = "streamlink"
+	if _, ok := common.DefaultStore.Add(job); !ok {
+		slog.Info("streamlink: job already exists", "video_id", channelLive.VideoID)
+		return
 	}
 
-	if strings.Contains(output, "Closing currently open stream...") {
-		common.DownloadJobs[videoId].Status = "Finished"
-		common.DownloadJobs[videoId].Output = output
+	allArgs := append([]string(nil), args...)
+	allArgs = append(allArgs, url)
+	allArgs = append(allArgs, cfg.Args...)
+
+	downloadCfg := common.DownloaderConfig{
+		Executable: cfg.ExecutablePath,
+		WorkingDir: cfg.WorkingDirectory,
+		Args:       allArgs,
 	}
+
+	p := &parser{job: job}
+	if err := common.RunExternalDownloader(ctx, downloadCfg, job, p); err != nil {
+		slog.Error("streamlink: download failed", "video_id", job.VideoID, "error", err)
+	} else {
+		slog.Info("streamlink: download finished", "video_id", job.VideoID, "final_file", job.FinalFile)
+	}
+}
+
+func (p *parser) Parse(line string, update func(func(*common.DownloadJob))) {
+	slog.Debug("streamlink: output", "line", line)
+
+	switch {
+	case p.waitOutputPath:
+		update(func(j *common.DownloadJob) {
+			j.FinalFile = strings.TrimSpace(line)
+			j.Status = common.StatusDownloading
+		})
+		p.waitOutputPath = false
+	case strings.Contains(line, "Writing output to"):
+		p.waitOutputPath = true
+	case strings.Contains(line, "Closing currently open stream..."):
+		update(func(j *common.DownloadJob) {
+			j.Status = common.StatusFinished
+			j.Output = line
+			moveDownload(j)
+		})
+		discord.SendNotification(context.Background(), p.job.ChannelLive.ChannelName, p.job.ChannelLive.Title,
+			fmt.Sprintf("https://twitch.tv/%s", p.job.ChannelLive.ChannelName), p.job.ChannelLive.ThumbnailURL, "Done")
+	}
+}
+
+func moveDownload(job *common.DownloadJob) {
+	if job.FinalFile == "" {
+		return
+	}
+	filename := filepath.Base(job.FinalFile)
+	dest := filepath.Join(job.OutPath, filename)
+	if err := common.MoveFile(job.FinalFile, dest); err != nil {
+		slog.Error("streamlink: failed to move file", "error", err)
+		return
+	}
+	job.FinalFile = dest
 }
