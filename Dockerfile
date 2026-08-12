@@ -1,8 +1,9 @@
-FROM node:20-alpine AS web
-WORKDIR /helpers/webserver/frontend
-COPY /helpers/webserver/frontend .
-RUN yarn install
-RUN yarn build
+# WHYYY YARN INSTALL SO SLOW ON GITHUB ACTIONS?????
+# FROM node:20-alpine AS web
+# WORKDIR /helpers/webserver/frontend
+# COPY /helpers/webserver/frontend .
+# RUN yarn install
+# RUN yarn build
 
 # FROM golang:1.22-alpine AS ytarchive-builder
 # WORKDIR /src
@@ -15,7 +16,7 @@ RUN yarn build
 FROM golang:1.22-alpine AS build
 WORKDIR /app
 COPY . .
-COPY --from=web /helpers/webserver/frontend/dist /app/helpers/webserver/frontend/dist
+# COPY --from=web /helpers/webserver/frontend/dist /app/helpers/webserver/frontend/dist
 RUN go build -o super-bad-stream-watcher ./cmd
 
 FROM alpine AS runner
