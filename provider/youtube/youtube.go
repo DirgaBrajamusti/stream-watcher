@@ -237,6 +237,16 @@ func GetVideoDetailsFromID(ctx context.Context, videoID string) (*common.Channel
 func CheckLiveAllChannel(ctx context.Context) {
 	cfg := config.Get()
 	for i, channel := range cfg.YouTubeChannel {
+		// Throttle API requests: wait between every channel check, including
+		// offline or errored channels.
+		if i > 0 {
+			select {
+			case <-time.After(config.YouTubeDelay()):
+			case <-ctx.Done():
+				return
+			}
+		}
+
 		slog.Info("youtube: checking channel", "channel", channel.Name)
 		live, err := GetChannelLive(ctx, channel.ID, channel.UseMemberCookies)
 		if err != nil {
@@ -255,14 +265,6 @@ func CheckLiveAllChannel(ctx context.Context) {
 			go ytarchive.StartDownload(ctx,
 				fmt.Sprintf("https://www.youtube.com/watch?v=%s", live.VideoID),
 				[]string{}, live, channel.OutPath)
-		}
-
-		if i < len(cfg.YouTubeChannel)-1 {
-			select {
-			case <-time.After(config.CheckInterval()):
-			case <-ctx.Done():
-				return
-			}
 		}
 	}
 }

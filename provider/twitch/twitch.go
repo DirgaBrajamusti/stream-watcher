@@ -127,6 +127,12 @@ func getChannelInfo(ctx context.Context, username string) (*common.ChannelLive, 
 func CheckLiveAllChannel(ctx context.Context) {
 	cfg := config.Get()
 	for i, channel := range cfg.TwitchChannel {
+		// Throttle API requests: wait between every channel check, including
+		// offline or errored channels.
+		if i > 0 {
+			sleepCtx(ctx, config.TwitchDelay())
+		}
+
 		if common.DefaultStore.IsChannelBusy(channel.Name) {
 			slog.Debug("twitch: channel already has active job", "channel", channel.Name)
 			continue
@@ -159,10 +165,6 @@ func CheckLiveAllChannel(ctx context.Context) {
 
 		outPath := channel.OutPath
 		go StartDownload(ctx, channel.Name, live, outPath)
-
-		if i < len(cfg.TwitchChannel)-1 {
-			sleepCtx(ctx, config.CheckInterval())
-		}
 	}
 }
 

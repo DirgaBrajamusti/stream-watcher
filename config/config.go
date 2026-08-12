@@ -42,13 +42,16 @@ type StreamlinkConfig struct {
 
 // ArchiveConfig holds the global archive settings.
 type ArchiveConfig struct {
-	Cookies               string `mapstructure:"cookies"`
-	MemberCookies         string `mapstructure:"member_cookies"`
-	Checker               int    `mapstructure:"checker"`
-	Twitch                bool   `mapstructure:"twitch"`
-	YouTube               bool   `mapstructure:"youtube"`
-	RPLAY                 bool   `mapstructure:"rplay"`
-	TwitchUsingStreamlink bool   `mapstructure:"twitch_using_streamlink"`
+	Cookies               string        `mapstructure:"cookies"`
+	MemberCookies         string        `mapstructure:"member_cookies"`
+	Checker               int           `mapstructure:"checker"`
+	Twitch                bool          `mapstructure:"twitch"`
+	YouTube               bool          `mapstructure:"youtube"`
+	RPLAY                 bool          `mapstructure:"rplay"`
+	TwitchUsingStreamlink bool          `mapstructure:"twitch_using_streamlink"`
+	TwitchCheckDelay      time.Duration `mapstructure:"twitch_check_delay"`
+	YouTubeCheckDelay     time.Duration `mapstructure:"youtube_check_delay"`
+	RPLAYCheckDelay       time.Duration `mapstructure:"rplay_check_delay"`
 }
 
 type RPLAYAuthConfig struct {
@@ -174,6 +177,36 @@ func CheckInterval() time.Duration {
 	return time.Duration(minutes) * time.Minute
 }
 
+// TwitchDelay returns the delay between individual Twitch channel checks,
+// clamped to a minimum of zero.
+func TwitchDelay() time.Duration {
+	cfg := Get()
+	if cfg.Archive.TwitchCheckDelay < 0 {
+		return 0
+	}
+	return cfg.Archive.TwitchCheckDelay
+}
+
+// YouTubeDelay returns the delay between individual YouTube channel checks,
+// clamped to a minimum of zero.
+func YouTubeDelay() time.Duration {
+	cfg := Get()
+	if cfg.Archive.YouTubeCheckDelay < 0 {
+		return 0
+	}
+	return cfg.Archive.YouTubeCheckDelay
+}
+
+// RPLAYDelay returns the delay between individual RPLAY channel checks,
+// clamped to a minimum of zero.
+func RPLAYDelay() time.Duration {
+	cfg := Get()
+	if cfg.Archive.RPLAYCheckDelay < 0 {
+		return 0
+	}
+	return cfg.Archive.RPLAYCheckDelay
+}
+
 // ReloadConfig reloads the configuration file from disk and applies it if validation
 // succeeds.
 func ReloadConfig() error {
@@ -220,6 +253,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("archive.twitch", true)
 	v.SetDefault("archive.youtube", true)
 	v.SetDefault("archive.rplay", false)
+	v.SetDefault("archive.twitch_check_delay", 10*time.Second)
+	v.SetDefault("archive.youtube_check_delay", 10*time.Second)
+	v.SetDefault("archive.rplay_check_delay", 10*time.Second)
 	v.SetDefault("webserver.host", "0.0.0.0")
 	v.SetDefault("webserver.port", "3000")
 	v.SetDefault("discord.notify", false)
@@ -230,6 +266,15 @@ func validate(cfg *Config) error {
 
 	if cfg.Archive.Checker < 0 {
 		errs = append(errs, "archive.checker must be non-negative")
+	}
+	if cfg.Archive.TwitchCheckDelay < 0 {
+		errs = append(errs, "archive.twitch_check_delay must be non-negative")
+	}
+	if cfg.Archive.YouTubeCheckDelay < 0 {
+		errs = append(errs, "archive.youtube_check_delay must be non-negative")
+	}
+	if cfg.Archive.RPLAYCheckDelay < 0 {
+		errs = append(errs, "archive.rplay_check_delay must be non-negative")
 	}
 	if cfg.Webserver.Port == "" {
 		errs = append(errs, "webserver.port is required")

@@ -118,6 +118,16 @@ func CheckLiveAllChannel(ctx context.Context) {
 	}
 
 	for i, channel := range cfg.RPLAYChannel {
+		// Throttle API requests: wait between every channel check, including
+		// offline or errored channels.
+		if i > 0 {
+			select {
+			case <-time.After(config.RPLAYDelay()):
+			case <-ctx.Done():
+				return
+			}
+		}
+
 		if common.DefaultStore.IsChannelBusy(channel.UserID) {
 			slog.Debug("rplay: channel already has active job", "user_id", channel.UserID)
 			continue
@@ -158,14 +168,6 @@ func CheckLiveAllChannel(ctx context.Context) {
 		discord.SendNotification(ctx, channel.Name, live.Title,
 			fmt.Sprintf("https://rplay.live/creator/%s", channel.UserID), live.ThumbnailURL, "Recording")
 		go rplaydl.StartDownload(ctx, info.LivestreamURL, live, channel.OutPath)
-
-		if i < len(cfg.RPLAYChannel)-1 {
-			select {
-			case <-time.After(config.CheckInterval()):
-			case <-ctx.Done():
-				return
-			}
-		}
 	}
 }
 
