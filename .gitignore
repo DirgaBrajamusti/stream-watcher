@@ -1,4 +1,8 @@
 config.toml
 test*
 temp
+logs
 node_modules
+helpers/webserver/frontend/dist
+stream-watcher
+super-bad-stream-watcher

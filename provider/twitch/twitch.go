@@ -21,6 +21,10 @@ const (
 	clientID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
 )
 
+var (
+	channelErrorTracker = common.NewErrorTracker()
+)
+
 type streamInfo struct {
 	ID              string `json:"id"`
 	Title           string `json:"title"`
@@ -39,8 +43,23 @@ type responseData struct {
 }
 
 // GetChannelInfo fetches Twitch channel information and returns the live stream if
-// the channel is currently broadcasting.
+// the channel is currently broadcasting. When the request keeps failing, a Discord
+// notification is sent once the consecutive failure count reaches
+// common.ErrorThreshold.
 func GetChannelInfo(ctx context.Context, username string) (*common.ChannelLive, error) {
+	live, err := getChannelInfo(ctx, username)
+	if err != nil {
+		if channelErrorTracker.Fail("twitch:" + username) {
+			discord.SendNotification(ctx, username, fmt.Sprintf("Twitch API error: %v", err),
+				fmt.Sprintf("https://twitch.tv/%s", username), "", "Error")
+		}
+	} else {
+		channelErrorTracker.Success("twitch:" + username)
+	}
+	return live, err
+}
+
+func getChannelInfo(ctx context.Context, username string) (*common.ChannelLive, error) {
 	query := fmt.Sprintf(`query {
 		user(login: "%s") {
 			profileImageURL(width: 50)

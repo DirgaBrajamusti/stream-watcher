@@ -35,6 +35,8 @@ var (
 	reChannelName2 = regexp.MustCompile(`ChannelName":"(.*?)"`)
 )
 
+var channelErrorTracker = common.NewErrorTracker()
+
 // netscapeCookie represents a single line in a Netscape cookie file.
 type netscapeCookie struct {
 	Domain     string
@@ -108,8 +110,23 @@ func httpClientWithCookies(useMemberCookies bool) (*http.Client, error) {
 }
 
 // GetChannelLive checks a YouTube channel's streams page and returns the first live
-// stream that matches the channel configuration.
+// stream that matches the channel configuration. When the request keeps failing, a
+// Discord notification is sent once the consecutive failure count reaches
+// common.ErrorThreshold.
 func GetChannelLive(ctx context.Context, channelID string, useMemberCookies bool) (*common.ChannelLive, error) {
+	live, err := getChannelLive(ctx, channelID, useMemberCookies)
+	if err != nil {
+		if channelErrorTracker.Fail("youtube:" + channelID) {
+			discord.SendNotification(ctx, youtubeChannelName(channelID), fmt.Sprintf("YouTube API error: %v", err),
+				fmt.Sprintf("https://www.youtube.com/channel/%s", channelID), "", "Error")
+		}
+	} else {
+		channelErrorTracker.Success("youtube:" + channelID)
+	}
+	return live, err
+}
+
+func getChannelLive(ctx context.Context, channelID string, useMemberCookies bool) (*common.ChannelLive, error) {
 	client, err := httpClientWithCookies(useMemberCookies)
 	if err != nil {
 		return nil, err
@@ -290,6 +307,17 @@ func ParseVideoID(parsed *url.URL) (string, bool) {
 		return id, id != ""
 	}
 	return "", false
+}
+
+// youtubeChannelName resolves a channel display name from the configured YouTube
+// channels, falling back to the channel ID when it is not configured.
+func youtubeChannelName(channelID string) string {
+	for _, ch := range config.Get().YouTubeChannel {
+		if ch.ID == channelID {
+			return ch.Name
+		}
+	}
+	return channelID
 }
 
 func firstMatch(re *regexp.Regexp, text string) string {

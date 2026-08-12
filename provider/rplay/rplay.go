@@ -17,8 +17,9 @@ import (
 )
 
 var (
-	lastLiveMu sync.RWMutex
-	lastLive   = make(map[string]string)
+	lastLiveMu          sync.RWMutex
+	lastLive            = make(map[string]string)
+	channelErrorTracker = common.NewErrorTracker()
 )
 
 const playURL = "https://api.rplay.live/live/play"
@@ -33,8 +34,23 @@ type streamInfo struct {
 }
 
 // GetChannelInfo checks the RPLAY API and returns live stream metadata if the user
-// is currently broadcasting and the account has access.
+// is currently broadcasting and the account has access. When the request keeps
+// failing, a Discord notification is sent once the consecutive failure count reaches
+// common.ErrorThreshold.
 func GetChannelInfo(ctx context.Context, userID string) (*common.ChannelLive, *streamInfo, error) {
+	live, info, err := getChannelInfo(ctx, userID)
+	if err != nil {
+		if channelErrorTracker.Fail("rplay:" + userID) {
+			discord.SendNotification(ctx, rplayChannelName(userID), fmt.Sprintf("RPLAY API error: %v", err),
+				fmt.Sprintf("https://rplay.live/creator/%s", userID), "", "Error")
+		}
+	} else {
+		channelErrorTracker.Success("rplay:" + userID)
+	}
+	return live, info, err
+}
+
+func getChannelInfo(ctx context.Context, userID string) (*common.ChannelLive, *streamInfo, error) {
 	auth, err := NewAuth()
 	if err != nil {
 		return nil, nil, err
@@ -163,4 +179,15 @@ func markRecorded(userID, startTime string) {
 	lastLiveMu.Lock()
 	defer lastLiveMu.Unlock()
 	lastLive[userID] = startTime
+}
+
+// rplayChannelName resolves a channel display name from the configured RPLAY channels,
+// falling back to the user ID when it is not configured.
+func rplayChannelName(userID string) string {
+	for _, ch := range config.Get().RPLAYChannel {
+		if ch.UserID == userID {
+			return ch.Name
+		}
+	}
+	return userID
 }

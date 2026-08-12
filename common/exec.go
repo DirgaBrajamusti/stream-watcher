@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -26,7 +28,8 @@ type DownloaderConfig struct {
 }
 
 // RunExternalDownloader spawns an external download process and blocks until it exits.
-// stdout and stderr are parsed line-by-line by the provided parser.
+// stdout and stderr are parsed line-by-line by the provided parser and are also
+// written to a per-job log file in the job's output directory.
 func RunExternalDownloader(ctx context.Context, cfg DownloaderConfig, job *DownloadJob, parser OutputParser) error {
 	cmd := buildCmd(ctx, cfg)
 
@@ -37,6 +40,25 @@ func RunExternalDownloader(ctx context.Context, cfg DownloaderConfig, job *Downl
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("create stderr pipe: %w", err)
+	}
+
+	logFile, err := openOutputLog(job)
+	if err != nil {
+		slog.Warn("download: failed to open output log file", "video_id", job.VideoID, "error", err)
+	} else {
+		defer logFile.Close()
+	}
+
+	var logMu sync.Mutex
+	writeLog := func(line string) {
+		if logFile == nil {
+			return
+		}
+		logMu.Lock()
+		defer logMu.Unlock()
+		if _, err := fmt.Fprintln(logFile, line); err != nil {
+			slog.Debug("download: failed to write output log", "video_id", job.VideoID, "error", err)
+		}
 	}
 
 	slog.Info("starting download", "video_id", job.VideoID, "executable", cfg.Executable)
@@ -53,11 +75,17 @@ func RunExternalDownloader(ctx context.Context, cfg DownloaderConfig, job *Downl
 
 	go func() {
 		defer wg.Done()
-		ReadOutputLines(stdout, func(line string) { parser.Parse(line, update) })
+		ReadOutputLines(stdout, func(line string) {
+			writeLog(line)
+			parser.Parse(line, update)
+		})
 	}()
 	go func() {
 		defer wg.Done()
-		ReadOutputLines(stderr, func(line string) { parser.Parse(line, update) })
+		ReadOutputLines(stderr, func(line string) {
+			writeLog(line)
+			parser.Parse(line, update)
+		})
 	}()
 
 	wg.Wait()
@@ -75,6 +103,44 @@ func RunExternalDownloader(ctx context.Context, cfg DownloaderConfig, job *Downl
 	}
 
 	return nil
+}
+
+// openOutputLog creates (or appends to) a per-job log file in the app's centralized
+// ./logs directory, named <date>_<channel>_<videoID>.log. It returns an error only
+// if the file cannot be created; output logging is skipped when it fails.
+func openOutputLog(job *DownloadJob) (*os.File, error) {
+	dir := "logs"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create logs directory: %w", err)
+	}
+
+	date := job.CreatedAt.Format("2006-01-02")
+	channel := sanitizeFilename(job.ChannelLive.ChannelName)
+	if channel == "" {
+		channel = "unknown"
+	}
+	videoID := sanitizeFilename(job.VideoID)
+	if videoID == "" {
+		videoID = "unknown"
+	}
+
+	filename := fmt.Sprintf("%s_%s_%s.log", date, channel, videoID)
+	return os.OpenFile(filepath.Join(dir, filename), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+}
+
+// sanitizeFilename replaces characters that are invalid in filenames.
+func sanitizeFilename(s string) string {
+	return strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+	).Replace(s)
 }
 
 func buildCmd(ctx context.Context, cfg DownloaderConfig) *exec.Cmd {
