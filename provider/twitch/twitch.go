@@ -25,10 +25,15 @@ var (
 	channelErrorTracker = common.NewErrorTracker()
 )
 
+type gameInfo struct {
+	DisplayName string `json:"displayName"`
+}
+
 type streamInfo struct {
-	ID              string `json:"id"`
-	Title           string `json:"title"`
-	PreviewImageURL string `json:"previewImageURL"`
+	ID              string    `json:"id"`
+	Title           string    `json:"title"`
+	Game            *gameInfo `json:"game"`
+	PreviewImageURL string    `json:"previewImageURL"`
 }
 
 type user struct {
@@ -66,6 +71,9 @@ func getChannelInfo(ctx context.Context, username string) (*common.ChannelLive, 
 			stream {
 				id
 				title
+				game {
+					displayName
+				}
 				previewImageURL(height: 720, width: 1280)
 			}
 		}
@@ -108,10 +116,15 @@ func getChannelInfo(ctx context.Context, username string) (*common.ChannelLive, 
 
 	stream := data.Data.User.Stream
 	streamProfilePic := data.Data.User.ProfileImageURL
+	gameName := ""
+	if stream.Game != nil {
+		gameName = stream.Game.DisplayName
+	}
 	dateCrawled := time.Now().UTC()
 
 	return &common.ChannelLive{
 		Title:          stream.Title,
+		Game:           gameName,
 		ChannelID:      username,
 		ThumbnailURL:   stream.PreviewImageURL,
 		VideoID:        stream.ID,
@@ -159,7 +172,13 @@ func CheckLiveAllChannel(ctx context.Context) {
 			continue
 		}
 
-		slog.Info("twitch: live stream detected", "channel", channel.Name, "title", live.Title)
+		// Game filters are optional: an empty list accepts every game.
+		if len(channel.GameFilters) > 0 && !common.MatchFilters(live.Game, channel.GameFilters) {
+			slog.Debug("twitch: stream does not match game filters", "channel", channel.Name, "game", live.Game)
+			continue
+		}
+
+		slog.Info("twitch: live stream detected", "channel", channel.Name, "title", live.Title, "game", live.Game)
 		discord.SendNotification(ctx, channel.Name, live.Title,
 			fmt.Sprintf("https://twitch.tv/%s", channel.Name), live.ThumbnailURL, "Recording")
 

@@ -23,6 +23,7 @@ const (
 // ChannelLive holds metadata about a currently live stream.
 type ChannelLive struct {
 	Title          string
+	Game           string
 	ThumbnailURL   string
 	ChannelID      string
 	VideoID        string

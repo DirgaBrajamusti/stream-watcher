@@ -84,9 +84,10 @@ type YouTubeChannel struct {
 
 // TwitchChannel represents a single channel to watch on Twitch.
 type TwitchChannel struct {
-	Name    string   `mapstructure:"name"`
-	Filters []string `mapstructure:"filters"`
-	OutPath string   `mapstructure:"out_path"`
+	Name        string   `mapstructure:"name"`
+	Filters     []string `mapstructure:"filters"`
+	GameFilters []string `mapstructure:"game_filters"`
+	OutPath     string   `mapstructure:"out_path"`
 }
 
 // WebserverConfig holds the web server bind settings.
