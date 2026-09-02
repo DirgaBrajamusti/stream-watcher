@@ -161,8 +161,11 @@ func (s *JobStore) Remove(videoID string) {
 
 // MatchFilters returns true if the title matches any of the provided regex filters.
 // An empty filter string acts as a wildcard and matches everything. An empty filter
-// list matches nothing.
+// list (or nil) also acts as a wildcard.
 func MatchFilters(title string, filters []string) bool {
+	if len(filters) == 0 {
+		return true
+	}
 	for _, f := range filters {
 		if f == "" {
 			return true

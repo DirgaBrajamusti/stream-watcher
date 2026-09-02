@@ -16,6 +16,8 @@ const defaultUsername = "Stream Watcher"
 
 var statusColors = map[string]int{
 	"Recording": 65280,    // green
+	"Live":      3447003,  // blue
+	"Ended":     15108834, // orange
 	"Done":      9934835,  // purple-ish
 	"Error":     16711680, // red
 }

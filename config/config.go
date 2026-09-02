@@ -88,6 +88,9 @@ type TwitchChannel struct {
 	Filters     []string `mapstructure:"filters"`
 	GameFilters []string `mapstructure:"game_filters"`
 	OutPath     string   `mapstructure:"out_path"`
+	// NotifyWhenEnd skips recording entirely: when the channel goes live the
+	// stream is only noted, and a Discord notification is sent once it ends.
+	NotifyWhenEnd bool `mapstructure:"notify_when_end"`
 }
 
 // WebserverConfig holds the web server bind settings.

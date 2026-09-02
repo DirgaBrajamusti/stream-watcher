@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"streamwatcher/common"
@@ -23,6 +24,11 @@ const (
 
 var (
 	channelErrorTracker = common.NewErrorTracker()
+
+	// notedMu guards notedLive, which tracks live streams of channels with
+	// notify_when_end enabled so an end notification can be sent later.
+	notedMu   sync.Mutex
+	notedLive = make(map[string]*common.ChannelLive)
 )
 
 type gameInfo struct {
@@ -136,7 +142,9 @@ func getChannelInfo(ctx context.Context, username string) (*common.ChannelLive, 
 }
 
 // CheckLiveAllChannel checks every configured Twitch channel and starts a download
-// when a matching live stream is found.
+// when a matching live stream is found. Channels with NotifyWhenEnd enabled are not
+// recorded: their live streams are noted and a notification is sent when the stream
+// ends.
 func CheckLiveAllChannel(ctx context.Context) {
 	cfg := config.Get()
 	for i, channel := range cfg.TwitchChannel {
@@ -159,6 +167,11 @@ func CheckLiveAllChannel(ctx context.Context) {
 		}
 		if live == nil {
 			slog.Debug("twitch: channel is offline", "channel", channel.Name)
+			if channel.NotifyWhenEnd {
+				notifyStreamEnded(ctx, channel.Name)
+			} else {
+				dropNoted(channel.Name)
+			}
 			continue
 		}
 
@@ -173,8 +186,13 @@ func CheckLiveAllChannel(ctx context.Context) {
 		}
 
 		// Game filters are optional: an empty list accepts every game.
-		if len(channel.GameFilters) > 0 && !common.MatchFilters(live.Game, channel.GameFilters) {
+		if !common.MatchFilters(live.Game, channel.GameFilters) {
 			slog.Debug("twitch: stream does not match game filters", "channel", channel.Name, "game", live.Game)
+			continue
+		}
+
+		if channel.NotifyWhenEnd {
+			noteLive(ctx, channel.Name, live)
 			continue
 		}
 
@@ -184,6 +202,56 @@ func CheckLiveAllChannel(ctx context.Context) {
 
 		outPath := channel.OutPath
 		go StartDownload(ctx, channel.Name, live, outPath)
+	}
+}
+
+// noteLive remembers that a channel is live so a notification can be sent when
+// the stream ends, and sends the usual live notification. Channels with
+// notify_when_end enabled are never recorded.
+func noteLive(ctx context.Context, channelName string, live *common.ChannelLive) {
+	notedMu.Lock()
+	if _, ok := notedLive[channelName]; ok {
+		notedMu.Unlock()
+		slog.Debug("twitch: live stream already noted", "channel", channelName)
+		return
+	}
+	notedLive[channelName] = live
+	notedMu.Unlock()
+
+	slog.Info("twitch: live stream noted, waiting for it to end",
+		"channel", channelName, "title", live.Title, "game", live.Game)
+	discord.SendNotification(ctx, channelName, live.Title,
+		fmt.Sprintf("https://twitch.tv/%s", channelName), live.ThumbnailURL, "Live")
+}
+
+// notifyStreamEnded sends the end notification for a noted stream and clears
+// the note. It is a no-op when the channel was not noted as live.
+func notifyStreamEnded(ctx context.Context, channelName string) {
+	notedMu.Lock()
+	live, ok := notedLive[channelName]
+	if ok {
+		delete(notedLive, channelName)
+	}
+	notedMu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	slog.Info("twitch: stream ended", "channel", channelName, "title", live.Title)
+	discord.SendNotification(ctx, channelName, live.Title,
+		fmt.Sprintf("https://twitch.tv/%s", channelName), live.ThumbnailURL, "Ended")
+}
+
+// dropNoted silently removes a stale note, e.g. when notify_when_end was
+// disabled while the channel was still noted as live.
+func dropNoted(channelName string) {
+	notedMu.Lock()
+	defer notedMu.Unlock()
+	if live, ok := notedLive[channelName]; ok {
+		delete(notedLive, channelName)
+		slog.Debug("twitch: dropped noted stream without notification",
+			"channel", channelName, "title", live.Title)
 	}
 }
 

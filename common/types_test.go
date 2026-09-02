@@ -54,7 +54,10 @@ func TestMatchFiltersEmpty(t *testing.T) {
 }
 
 func TestMatchFiltersEmptyList(t *testing.T) {
-	if MatchFilters("anything", []string{}) {
-		t.Fatal("empty filter list should not match")
+	if !MatchFilters("anything", []string{}) {
+		t.Fatal("empty filter list should match everything")
+	}
+	if !MatchFilters("anything", nil) {
+		t.Fatal("nil filter list should match everything")
 	}
 }
